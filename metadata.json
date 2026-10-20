@@ -1,0 +1,6 @@
+{
+  "name": "Rosée Beauty & Care - Store & ERP System",
+  "description": "نظام متكامل لمتجر مستحضرات التجميل والعناية بالبشرة الفاخر ROSÉE مع لوحة إدارة الطلبات والمخزون وقاعدة العملاء والتقارير المالية ووكالة التسويق بالذكاء الاصطناعي.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

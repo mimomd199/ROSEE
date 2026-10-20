@@ -115,9 +115,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   React.useEffect(() => {
     if (isSavingOrder) return;
     if (selectedOrderId) {
-      const found = orders.find(o => o.id === selectedOrderId);
+      const found = orders.find(o => o.id === selectedOrderId || String(o.id).trim() === String(selectedOrderId).trim());
       if (found) {
         if (!editOrder || editOrder.id !== selectedOrderId) {
+          setEditOrder(JSON.parse(JSON.stringify(found)));
+        } else if (
+          found.status !== editOrder.status || 
+          found.paymentStatus !== editOrder.paymentStatus || 
+          (found.history?.length || 0) !== (editOrder.history?.length || 0)
+        ) {
           setEditOrder(JSON.parse(JSON.stringify(found)));
         }
         return;
@@ -191,28 +197,29 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     setEditOrder({ ...editOrder, items: updatedItems });
   };
 
-  const handleSaveActiveOrder = async () => {
-    if (!editOrder) return;
-    if (editOrder.status === 'rejected' && !editOrder.rejectionReason?.trim()) {
+  const handleSaveActiveOrder = async (targetOverride?: Order) => {
+    const target = targetOverride || editOrder;
+    if (!target) return;
+    if (target.status === 'rejected' && !target.rejectionReason?.trim()) {
       alert('يرجى كتابة سبب رفض الطلب أولاً.');
       return;
     }
 
-    const currentTotal = getFinalTotal(editOrder);
-    const pStatus: PaymentStatus = editOrder.paymentStatus || (editOrder.paymentMethod === 'instapay' ? 'paid' : 'unpaid');
-    const depAmt = pStatus === 'deposit' ? (Number(editOrder.depositAmount) || 0) : undefined;
+    const currentTotal = getFinalTotal(target);
+    const pStatus: PaymentStatus = target.paymentStatus || (target.paymentMethod === 'instapay' ? 'paid' : 'unpaid');
+    const depAmt = pStatus === 'deposit' ? (Number(target.depositAmount) || 0) : undefined;
     const remaining = pStatus === 'paid' ? 0 : (pStatus === 'deposit' ? Math.max(0, currentTotal - (depAmt || 0)) : currentTotal);
 
-    const original = orders.find(o => o.id === editOrder.id);
-    const statusChanged = original && original.status !== editOrder.status;
+    const original = orders.find(o => o.id === target.id || String(o.id).trim() === String(target.id).trim());
+    const statusChanged = original && original.status !== target.status;
     const origPStatus = original ? (original.paymentStatus || (original.paymentMethod === 'instapay' ? 'paid' : 'unpaid')) : 'unpaid';
     const paymentChanged = original && (origPStatus !== pStatus || (pStatus === 'deposit' && original.depositAmount !== depAmt));
 
     let actionText = 'حفظ وتعديل بيانات الطلب';
     if (statusChanged && paymentChanged) {
-      actionText = `تحديث الحالة التشغيلية إلى [${statusMeta[editOrder.status].label}] وحالة السداد إلى [${paymentStatusMeta[pStatus].label}]`;
+      actionText = `تحديث الحالة التشغيلية إلى [${statusMeta[target.status].label}] وحالة السداد إلى [${paymentStatusMeta[pStatus].label}]`;
     } else if (statusChanged) {
-      actionText = `تحديث حالة الطلب إلى [${statusMeta[editOrder.status].label}]`;
+      actionText = `تحديث حالة الطلب إلى [${statusMeta[target.status].label}]`;
     } else if (paymentChanged) {
       actionText = `تحديث حالة السداد المالي إلى [${paymentStatusMeta[pStatus].label}]${pStatus === 'deposit' ? ` (عربون: ${depAmt} ج.م - متبقي: ${remaining} ج.م)` : ''}`;
     }
@@ -224,29 +231,52 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     };
 
     const finalOrderToSave: Order = {
-      ...editOrder,
-      status: editOrder.status,
+      ...target,
+      status: target.status,
       paymentStatus: pStatus,
       depositAmount: depAmt,
       remainingAmount: remaining,
       lastModifiedBy: currentUserName,
-      history: [historyEntry, ...(editOrder.history || [])]
+      history: [historyEntry, ...(target.history || [])]
     };
 
     setIsSavingOrder(true);
     setEditOrder(finalOrderToSave);
     try {
       await onSaveOrder(finalOrderToSave);
-      setSaveSuccessNotice(`✅ تم حفظ تعديلات الطلب #${editOrder.id} بنجاح!`);
+      setSaveSuccessNotice(`✅ تم حفظ وتثبيت تعديلات الطلب #${target.id} بنجاح!`);
       setTimeout(() => {
         setSaveSuccessNotice(null);
-      }, 3000);
+      }, 3500);
     } catch (err) {
       console.error(err);
       alert('حدث خطأ أثناء حفظ الطلب.');
     } finally {
       setIsSavingOrder(false);
     }
+  };
+
+  // Instant fast-actions for status & payment buttons
+  const handleQuickSaveStatus = async (st: OrderStatus) => {
+    if (!editOrder) return;
+    const nextOrder: Order = { ...editOrder, status: st };
+    setEditOrder(nextOrder);
+    await handleSaveActiveOrder(nextOrder);
+  };
+
+  const handleQuickSavePayment = async (pStat: PaymentStatus, depAmtVal?: number) => {
+    if (!editOrder) return;
+    const tot = getFinalTotal(editOrder);
+    const depAmt = pStat === 'deposit' ? (depAmtVal !== undefined ? depAmtVal : (editOrder.depositAmount || Math.round(tot * 0.3) || 50)) : undefined;
+    const remAmt = pStat === 'paid' ? 0 : (pStat === 'deposit' ? Math.max(0, tot - (depAmt || 0)) : tot);
+    const nextOrder: Order = {
+      ...editOrder,
+      paymentStatus: pStat,
+      depositAmount: depAmt,
+      remainingAmount: remAmt
+    };
+    setEditOrder(nextOrder);
+    await handleSaveActiveOrder(nextOrder);
   };
 
   const handleSendWhatsApp = () => {
@@ -563,7 +593,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                   </button>
 
                   <button
-                    onClick={handleSaveActiveOrder}
+                    onClick={() => handleSaveActiveOrder()}
                     disabled={isSavingOrder}
                     className="flex items-center gap-1.5 px-4 py-2 bg-[#111111] hover:bg-[#C5A059] text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 btn-pulsing"
                   >
@@ -637,7 +667,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                       <button
                         key={st}
                         type="button"
-                        onClick={() => setEditOrder({ ...editOrder, status: st })}
+                        onClick={() => {
+                          const next = { ...editOrder, status: st };
+                          setEditOrder(next);
+                        }}
                         className={`py-2 px-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex flex-col items-center gap-0.5 ${
                           isSelected 
                             ? 'bg-gray-900 text-white border-gray-950 shadow-xs ring-2 ring-[#C5A059]' 
@@ -651,6 +684,23 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                       </button>
                     );
                   })}
+                </div>
+
+                {/* Direct Fast-Save Status Bar */}
+                <div className="pt-2 flex items-center justify-between gap-2 border-t border-gray-200/80">
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    الحالة الحالية: <strong className="text-gray-900">[{statusMeta[editOrder.status].label}]</strong>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSavingOrder}
+                    onClick={() => handleSaveActiveOrder()}
+                    className="px-3 py-1.5 bg-[#111111] hover:bg-[#C5A059] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs"
+                    title="حفظ وتثبيت الحالة في قاعدة البيانات فوراً"
+                  >
+                    <Check className="w-3.5 h-3.5 text-[#C5A059]" />
+                    <span>تثبيت الحالة الآن</span>
+                  </button>
                 </div>
               </div>
 
@@ -802,6 +852,23 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* Direct Fast-Save Payment Status Bar */}
+                <div className="pt-2 flex items-center justify-between gap-2 border-t border-gray-200/80">
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    حالة السداد المحددة: <strong className="text-gray-900">[{paymentStatusMeta[editOrder.paymentStatus || (editOrder.paymentMethod === 'instapay' ? 'paid' : 'unpaid')].label}]</strong>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSavingOrder}
+                    onClick={() => handleSaveActiveOrder()}
+                    className="px-3.5 py-1.5 bg-[#111111] hover:bg-[#C5A059] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-xs"
+                    title="حفظ وتثبيت حالة السداد في السحابة فوراً"
+                  >
+                    <Check className="w-3.5 h-3.5 text-[#C5A059]" />
+                    <span>تثبيت السداد الآن</span>
+                  </button>
+                </div>
               </div>
 
               {/* Customer Details Editable Fields */}

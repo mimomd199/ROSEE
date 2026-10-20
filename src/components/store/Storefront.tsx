@@ -1192,111 +1192,113 @@ export const Storefront: React.FC<StorefrontProps> = ({
           </nav>
 
           {/* Action Zone (Zone 3) - Decluttered, elegant, comfortable to the eye */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-            {/* 1. Unified Utility Micro-Pill (Theme + Language) */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* 1. Unified Utility Micro-Capsule (Theme + Language) */}
             <div 
-              className="flex items-center rounded-xl border p-0.5 shadow-2xs"
+              className="flex items-center rounded-lg border p-0.5 shadow-2xs backdrop-blur-xs"
               style={{ 
-                backgroundColor: colors.cardBg, 
-                borderColor: `${colors.primaryAccent}30` 
+                backgroundColor: `${colors.cardBg}E6`, 
+                borderColor: `${colors.primaryAccent}25` 
               }}
             >
               {/* Day / Night Mode Switcher */}
               <button
                 onClick={handleToggleTheme}
-                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer hover:bg-black/5 active:scale-95"
+                className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-md flex items-center justify-center transition-all cursor-pointer hover:bg-black/5 active:scale-90"
                 style={{ color: colors.primaryAccent }}
                 title={themeMode === 'light' ? (langMode === 'ar' ? 'التحويل للوضع الليلي' : 'Switch to Dark Mode') : (langMode === 'ar' ? 'التحويل للوضع النهاري' : 'Switch to Light Mode')}
               >
-                {themeMode === 'light' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5 text-[#F59E0B]" />}
+                {themeMode === 'light' ? <Moon className="w-3 h-3" /> : <Sun className="w-3 h-3 text-[#F59E0B]" />}
               </button>
 
-              <div className="w-[1px] h-3.5 bg-gray-200 mx-0.5 opacity-60" />
+              <div className="w-[1px] h-3 bg-gray-200 dark:bg-gray-700 mx-0.5 opacity-50" />
 
               {/* Language Switcher */}
               <button
                 onClick={handleToggleLang}
-                className="px-2 h-7 sm:h-8 rounded-lg flex items-center gap-1 text-[11px] font-bold font-brand transition-all cursor-pointer hover:bg-black/5 active:scale-95"
+                className="px-1.5 h-6.5 sm:h-7 rounded-md flex items-center gap-0.5 text-[10px] font-bold font-brand transition-all cursor-pointer hover:bg-black/5 active:scale-90"
                 style={{ color: colors.headerTitleColor }}
                 title={langMode === 'ar' ? 'Switch to English' : 'التحويل للغة العربية'}
               >
-                <Globe className="w-3 h-3 text-[#C5A059]" />
+                <Globe className="w-2.5 h-2.5 text-[#C5A059]" />
                 <span>{langMode === 'ar' ? 'EN' : 'عربي'}</span>
               </button>
             </div>
 
-            {/* 2. Interactive Perks (Offers, Wheel, Quiz) in sleek, comfortable micro-buttons */}
-            {publishedOffers.length > 0 && (
-              <button
-                onClick={() => {
-                  setCurrentOfferSlide(0);
-                  setIsOffersPopUpOpen(true);
-                }}
-                className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-xl border flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 shrink-0"
-                style={{ 
-                  backgroundColor: `${colors.primaryAccent}15`, 
-                  borderColor: `${colors.primaryAccent}50` 
-                }}
-                title={`${texts.btnOffers} (${publishedOffers.length})`}
-              >
-                <Gift className="w-3.5 h-3.5" style={{ color: colors.primaryAccent }} />
-                <span 
-                  className="absolute -top-1 -right-1 text-white text-[8px] sm:text-[9px] w-4 h-4 rounded-full font-brand font-bold flex items-center justify-center shadow-xs"
-                  style={{ backgroundColor: colors.secondaryAccent }}
+            {/* 2. Interactive Perks Group (Offers, Wheel, Quiz) - Compact & Elegant */}
+            <div className="flex items-center gap-1">
+              {publishedOffers.length > 0 && (
+                <button
+                  onClick={() => {
+                    setCurrentOfferSlide(0);
+                    setIsOffersPopUpOpen(true);
+                  }}
+                  className="relative w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg border flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-90 shrink-0"
+                  style={{ 
+                    backgroundColor: `${colors.primaryAccent}15`, 
+                    borderColor: `${colors.primaryAccent}40` 
+                  }}
+                  title={`${texts.btnOffers} (${publishedOffers.length})`}
                 >
-                  {publishedOffers.length}
-                </span>
-              </button>
-            )}
+                  <Gift className="w-3 h-3" style={{ color: colors.primaryAccent }} />
+                  <span 
+                    className="absolute -top-1 -right-1 text-white text-[7.5px] sm:text-[8px] w-3.5 h-3.5 rounded-full font-brand font-bold flex items-center justify-center shadow-xs"
+                    style={{ backgroundColor: colors.secondaryAccent }}
+                  >
+                    {publishedOffers.length}
+                  </span>
+                </button>
+              )}
 
-            {spinWheelConfig.enabled && (
-              <button
-                onClick={() => setIsSpinWheelOpen(true)}
-                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl border flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 shrink-0"
-                style={{ 
-                  backgroundColor: colors.cardBg, 
-                  borderColor: `${colors.primaryAccent}30` 
-                }}
-                title="عجلة هدايا ROSÉE 🎡"
-              >
-                <span className="text-xs sm:text-sm">🎡</span>
-              </button>
-            )}
+              {spinWheelConfig.enabled && (
+                <button
+                  onClick={() => setIsSpinWheelOpen(true)}
+                  className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg border flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-90 shrink-0"
+                  style={{ 
+                    backgroundColor: colors.cardBg, 
+                    borderColor: `${colors.primaryAccent}25` 
+                  }}
+                  title="عجلة هدايا ROSÉE 🎡"
+                >
+                  <span className="text-[11px] sm:text-xs">🎡</span>
+                </button>
+              )}
 
-            {quizConfig.enabled && (
-              <button
-                onClick={() => setIsQuizOpen(true)}
-                className="hidden sm:flex w-8 h-8 sm:w-9 sm:h-9 rounded-xl border items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 shrink-0"
-                style={{ 
-                  backgroundColor: colors.cardBg, 
-                  borderColor: `${colors.primaryAccent}30` 
-                }}
-                title="مستشارك العطري واختيار المنتج المناسب ✨"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[#C5A059]" />
-              </button>
-            )}
+              {quizConfig.enabled && (
+                <button
+                  onClick={() => setIsQuizOpen(true)}
+                  className="hidden md:flex w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg border items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-90 shrink-0"
+                  style={{ 
+                    backgroundColor: colors.cardBg, 
+                    borderColor: `${colors.primaryAccent}25` 
+                  }}
+                  title="مستشارك العطري واختيار المنتج المناسب ✨"
+                >
+                  <Sparkles className="w-3 h-3 text-[#C5A059]" />
+                </button>
+              )}
+            </div>
 
-            {/* 3. Order Tracking (Desktop / Tablet) */}
+            {/* 3. Order Tracking (Desktop Pill) */}
             <button
               onClick={onOpenTracking}
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border rounded-xl transition-all cursor-pointer shadow-2xs hover:border-[#C5A059] shrink-0"
+              className="hidden lg:flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold border rounded-lg transition-all cursor-pointer shadow-2xs hover:border-[#C5A059] shrink-0"
               style={{ 
                 color: colors.headerTitleColor, 
                 backgroundColor: colors.cardBg,
-                borderColor: `${colors.primaryAccent}25` 
+                borderColor: `${colors.primaryAccent}20` 
               }}
               title="تتبع مسار شحنتك"
             >
               <span>{texts.btnTracking}</span>
             </button>
 
-            {/* 4. Primary Shopping Bag / Cart */}
+            {/* 4. Luxury Shopping Bag / Cart Pill */}
             <button
               id="store-header-cart-btn"
               onClick={onOpenCart}
-              className={`relative px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl cursor-pointer flex items-center gap-1.5 border transition-all duration-300 shadow-xs hover:border-[#C5A059] shrink-0 ${
-                isCartBumping ? 'scale-110 shadow-lg ring-2 ring-[#C5A059]' : ''
+              className={`relative px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 border transition-all duration-300 shadow-xs hover:border-[#C5A059] shrink-0 ${
+                isCartBumping ? 'scale-105 shadow-md ring-2 ring-[#C5A059]' : ''
               }`}
               style={{ 
                 backgroundColor: colors.cardBg, 
@@ -1308,11 +1310,11 @@ export const Storefront: React.FC<StorefrontProps> = ({
               <span className={`transition-transform duration-300 ${isCartBumping ? 'scale-110 text-[#C5A059]' : ''}`}>
                 {renderCartIcon()}
               </span>
-              <span className="hidden sm:inline text-xs font-bold font-brand">{texts.btnCart}</span>
+              <span className="hidden sm:inline text-[11px] font-bold font-brand">{texts.btnCart}</span>
               {totalCartCount > 0 && (
                 <span 
-                  className={`w-4.5 h-4.5 sm:w-5 sm:h-5 text-[9px] sm:text-[10px] font-bold rounded-full flex items-center justify-center border shadow-xs transition-transform duration-300 ${
-                    isCartBumping ? 'scale-115 bg-[#C5A059] text-white' : ''
+                  className={`w-4 h-4 text-[9px] font-bold rounded-full flex items-center justify-center border shadow-xs transition-transform duration-300 ${
+                    isCartBumping ? 'scale-110 bg-[#C5A059] text-white' : ''
                   }`}
                   style={{ 
                     backgroundColor: colors.heroBtnBg, 

@@ -405,9 +405,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // 1. Orders handlers (Atomic)
   const handleSaveOrder = async (updatedOrder: Order) => {
-    const updatedOrders = data.orders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
+    const updatedOrders = (data.orders || []).map(o => 
+      (o.id === updatedOrder.id || String(o.id).trim() === String(updatedOrder.id).trim()) 
+        ? { ...o, ...updatedOrder } 
+        : o
+    );
     const updatedLogs = appendLog(`تعديل وحفظ بيانات الطلب #${updatedOrder.id}`);
     await onSaveData({ ...data, orders: updatedOrders, systemLogs: updatedLogs });
+    try {
+      await updateRoseeField('orders', updatedOrders);
+      await updateRoseeField('systemLogs', updatedLogs);
+    } catch (err) {
+      console.warn("Direct field sync notice:", err);
+    }
   };
 
   const handleDeleteOrder = async (orderId: string) => {

@@ -31,21 +31,27 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({
   onNavigateToAdmin,
   tokenFromProp
 }) => {
-  // Extract token from prop, query parameter, or hash
-  const token = useMemo(() => {
+  // Extract token or OTP from prop, query parameter, or hash
+  const initialTokenOrOtp = useMemo(() => {
     if (tokenFromProp) return tokenFromProp;
     if (typeof window === 'undefined') return '';
     const params = new URLSearchParams(window.location.search);
-    const qToken = params.get('token');
-    if (qToken) return qToken.trim();
-    // Check hash for #token=...
+    const q = params.get('token') || params.get('otp');
+    if (q) return q.trim();
     const hash = window.location.hash;
     if (hash.includes('token=')) {
       const match = hash.match(/token=([^&]+)/);
       if (match && match[1]) return decodeURIComponent(match[1]).trim();
     }
+    if (hash.includes('otp=')) {
+      const match = hash.match(/otp=([^&]+)/);
+      if (match && match[1]) return decodeURIComponent(match[1]).trim();
+    }
     return '';
   }, [tokenFromProp]);
+
+  const [manualOtpInput, setManualOtpInput] = useState('');
+  const activeCode = initialTokenOrOtp || manualOtpInput.trim();
 
   // Form states
   const [newPassword, setNewPassword] = useState('');
@@ -55,17 +61,18 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  // Locate user matching the token
+  // Locate user matching the token or OTP
   const matchedUserEntry = useMemo(() => {
-    if (!token || !data.users) return null;
+    if (!activeCode || !data.users) return null;
     return Object.entries(data.users).find(([_, u]) => {
-      return u.reset_token && u.reset_token.trim() === token;
+      return (u.reset_token && u.reset_token.trim() === activeCode) ||
+             (u.reset_otp && u.reset_otp.trim() === activeCode);
     }) || null;
-  }, [token, data.users]);
+  }, [activeCode, data.users]);
 
   // Verify expiration (valid within 15 minutes)
   const tokenStatus = useMemo((): 'missing' | 'invalid' | 'expired' | 'valid' => {
-    if (!token) return 'missing';
+    if (!activeCode) return 'missing';
     if (!matchedUserEntry) return 'invalid';
 
     const [_, u] = matchedUserEntry;
@@ -80,7 +87,7 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({
     }
 
     return 'valid';
-  }, [token, matchedUserEntry]);
+  }, [activeCode, matchedUserEntry]);
 
   // Remaining time in minutes
   const remainingMinutes = useMemo(() => {
@@ -140,10 +147,11 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({
       // Hash new password using SHA-256 for absolute security
       const hashedPassword = await hashPassword(newPassword);
 
-      // Create updated user object with cleared reset token
+      // Create updated user object with cleared reset token and OTP
       const updatedUser: UserAccount = {
         ...user,
         password: hashedPassword,
+        reset_otp: undefined,
         reset_token: undefined,
         reset_token_expires: undefined
       };
@@ -247,31 +255,47 @@ export const ResetPasswordView: React.FC<ResetPasswordViewProps> = ({
               </button>
             </div>
           ) : tokenStatus === 'missing' || tokenStatus === 'invalid' ? (
-            /* CASE 2: INVALID OR MISSING TOKEN */
-            <div className="text-center space-y-5 py-4">
-              <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
-                <ShieldAlert className="w-9 h-9" />
+            /* CASE 2: INVALID OR MISSING TOKEN -> ALLOW MANUAL OTP ENTRY */
+            <div className="space-y-5 py-2">
+              <div className="text-center space-y-3">
+                <div className="w-14 h-14 rounded-full bg-[#C5A059]/10 border border-[#C5A059]/30 flex items-center justify-center mx-auto text-[#C5A059]">
+                  <Key className="w-7 h-7" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">التحقق بواسطة كود الـ OTP</h2>
+                  <p className="text-xs text-gray-400 mt-1">
+                    أدخل كود التحقق (OTP) المكون من 6 أرقام المرسل إلى بريدك:
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-2">
-                <h2 className="text-lg font-bold text-white">رابط الاستعادة غير صالح</h2>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  الرابط الذي قمت بفتحه غير صحيح أو قد تم استخدامه مسبقاً لحماية أمان الحساب.
-                </p>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={manualOtpInput}
+                  onChange={(e) => setManualOtpInput(e.target.value.replace(/\D/g, ''))}
+                  placeholder="• • • • • •"
+                  className="w-full py-3 px-4 bg-black/40 border-2 border-[#C5A059]/40 rounded-2xl text-center text-2xl font-mono tracking-[0.5em] text-white focus:outline-none focus:border-[#C5A059]"
+                />
+                {manualOtpInput.length > 0 && manualOtpInput.length < 6 && (
+                  <p className="text-[10px] text-gray-400 text-center">أدخل باقي الأرقام الستة</p>
+                )}
+                {manualOtpInput.length === 6 && !matchedUserEntry && (
+                  <p className="text-xs text-rose-400 text-center font-bold">كود التحقق غير صحيح أو منتهي الصلاحية.</p>
+                )}
               </div>
 
-              <div className="p-3 bg-white/5 border border-white/10 rounded-2xl text-[11px] text-gray-400">
-                💡 يرجى الذهاب إلى صفحة تسجيل الدخول والضغط على "نسيت كلمة المرور" لإصدار رابط جديد صالح.
+              <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={handleGoToAdmin}
+                  className="w-full py-3 px-4 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>العودة إلى تسجيل الدخول وطلب كود جديد</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={handleGoToAdmin}
-                className="w-full py-3.5 px-6 bg-white/10 hover:bg-white/20 text-white font-bold rounded-2xl text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <span>العودة إلى بوابة تسجيل الدخول</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
             </div>
           ) : tokenStatus === 'expired' ? (
             /* CASE 3: EXPIRED TOKEN */

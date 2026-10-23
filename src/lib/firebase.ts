@@ -214,10 +214,10 @@ export const DEFAULT_COLLECTIONS: CollectionGroup[] = [
 
 export const DEFAULT_USERS: { [code: string]: UserAccount } = {
   'ADMIN': {
-    name: 'أحمد مجدي',
+    name: 'أحمد مجدي (المدير العام)',
     role: 'admin',
-    password: '1234',
-    email: 'admin@rosee.com',
+    password: '123',
+    email: 'mimomd199@gmail.com',
     permissions: ['all']
   },
   'STAFF1': {

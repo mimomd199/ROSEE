@@ -1,8 +1,18 @@
 /**
  * Security & Email Delivery Service for Rosée Store
- * Handles cryptographic token generation, SHA-256 password hashing,
- * and transactional password reset emails (Resend / SMTP Relay).
+ * Handles cryptographic token generation, numeric OTP generation,
+ * SHA-256 password hashing, and multi-channel transactional email dispatch.
  */
+
+export function generateNumericOTP(length: number = 6): string {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint32Array(1);
+    window.crypto.getRandomValues(array);
+    const num = array[0] % Math.pow(10, length);
+    return num.toString().padStart(length, '0');
+  }
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 export function generateSecureToken(): string {
   if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
@@ -32,14 +42,14 @@ export async function hashPassword(plainText: string): Promise<string> {
   return `h_${Math.abs(hash).toString(16)}`;
 }
 
-export function buildResetEmailTemplate(userName: string, resetLink: string, expiryMinutes: number = 15): string {
+export function buildResetEmailTemplate(userName: string, otp: string, resetLink: string, expiryMinutes: number = 15): string {
   return `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>استعادة كلمة المرور - متجر Rosée</title>
+  <title>كود استعادة كلمة المرور (OTP) - متجر Rosée</title>
   <style>
     body {
       margin: 0;
@@ -52,25 +62,25 @@ export function buildResetEmailTemplate(userName: string, resetLink: string, exp
     .wrapper {
       width: 100%;
       background-color: #0d0d0d;
-      padding: 40px 10px;
+      padding: 30px 10px;
     }
     .container {
       max-width: 580px;
       margin: 0 auto;
       background: #141414;
-      border: 1px solid rgba(197, 160, 89, 0.35);
-      border-radius: 20px;
+      border: 1px solid rgba(197, 160, 89, 0.4);
+      border-radius: 24px;
       padding: 35px 30px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.8);
       text-align: right;
     }
     .brand-header {
       text-align: center;
-      padding-bottom: 25px;
+      padding-bottom: 20px;
       border-bottom: 1px solid rgba(197, 160, 89, 0.2);
     }
     .brand-name {
-      font-size: 26px;
+      font-size: 28px;
       font-weight: 700;
       letter-spacing: 6px;
       color: #C5A059;
@@ -84,7 +94,7 @@ export function buildResetEmailTemplate(userName: string, resetLink: string, exp
       text-transform: uppercase;
     }
     .content-body {
-      padding: 30px 0;
+      padding: 25px 0;
       line-height: 1.8;
       font-size: 14px;
       color: #cccccc;
@@ -95,21 +105,51 @@ export function buildResetEmailTemplate(userName: string, resetLink: string, exp
       color: #ffffff;
       margin-bottom: 15px;
     }
+    .otp-card {
+      background: linear-gradient(135deg, rgba(197, 160, 89, 0.12) 0%, rgba(20, 20, 20, 0.8) 100%);
+      border: 2px dashed #C5A059;
+      padding: 25px;
+      border-radius: 18px;
+      text-align: center;
+      margin: 25px 0;
+    }
+    .otp-label {
+      font-size: 12px;
+      color: #C5A059;
+      font-weight: 800;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .otp-number {
+      font-size: 42px;
+      font-weight: 900;
+      letter-spacing: 14px;
+      color: #FFFFFF;
+      font-family: 'Courier New', Courier, monospace;
+      text-shadow: 0 0 15px rgba(197, 160, 89, 0.5);
+      direction: ltr;
+      display: inline-block;
+    }
+    .otp-expiry {
+      font-size: 11px;
+      color: #999999;
+      margin-top: 10px;
+    }
     .cta-container {
       text-align: center;
-      margin: 35px 0;
+      margin: 25px 0 15px 0;
     }
     .btn-reset {
       display: inline-block;
       background: linear-gradient(135deg, #DFBA73 0%, #C5A059 100%);
       color: #0D0D0D !important;
       text-decoration: none;
-      padding: 14px 38px;
-      font-size: 14px;
+      padding: 13px 34px;
+      font-size: 13px;
       font-weight: 800;
       border-radius: 12px;
-      box-shadow: 0 10px 25px rgba(197, 160, 89, 0.35);
-      letter-spacing: 0.5px;
+      box-shadow: 0 8px 20px rgba(197, 160, 89, 0.35);
     }
     .warning-box {
       background: rgba(197, 160, 89, 0.08);
@@ -119,15 +159,6 @@ export function buildResetEmailTemplate(userName: string, resetLink: string, exp
       font-size: 12px;
       color: #b5b5b5;
       margin-top: 25px;
-    }
-    .raw-link {
-      word-break: break-all;
-      color: #C5A059;
-      font-size: 11px;
-      margin-top: 10px;
-      display: block;
-      direction: ltr;
-      text-align: left;
     }
     .footer {
       border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -151,34 +182,37 @@ export function buildResetEmailTemplate(userName: string, resetLink: string, exp
         <p>
           تلقينا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك في بوابة إدارة متجر <strong>Rosée</strong>.
         </p>
+
+        <!-- Big Bold OTP Box -->
+        <div class="otp-card">
+          <div class="otp-label">رمز التحقق لمرة واحدة (OTP)</div>
+          <div class="otp-number">${otp}</div>
+          <div class="otp-expiry">⏳ صالح لمدة <strong>${expiryMinutes} دقيقة</strong> فقط من وقت الاستلام</div>
+        </div>
+
         <p>
-          لتعيين كلمة مرور جديدة لحسابك، يرجى النقر على الزر المباشر والآمن بالأسفل:
+          يمكنك إدخال هذا الكود مباشرة في شاشة التحقق، أو النقر على الرابط المباشر بالأسفل:
         </p>
 
         <div class="cta-container">
           <a href="${resetLink}" class="btn-reset" target="_blank">
-            إعادة تعيين كلمة المرور الآن 🔒
+            إعادة تعيين كلمة المرور عبر الرابط 🔒
           </a>
         </div>
 
         <div class="warning-box">
-          ⚠️ <strong>تنبيه أمني هام:</strong>
+          ⚠️ <strong>تنبيه أمني:</strong>
           <br>
-          • هذا الرابط صالح للاستخدام مرة واحدة فقط، وينتهي خلال <strong>${expiryMinutes} دقيقة</strong>.
+          • لا تشارك هذا الرمز مع أي شخص إطلاقاً؛ موظفو الدعم الفني لن يطلبوا منك كلمة المرور أو كود الـ OTP أبداً.
           <br>
-          • إذا لم تقم بطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذه الرسالة فوراً فحسابك في أمان تام ولم يتم إجراء أي تغيير.
+          • إذا لم تكن أنت من طلب هذا الرمز، يرجى تجاهل هذه الرسالة فوراً.
         </div>
-
-        <p style="margin-top: 25px; font-size: 12px; color: #888;">
-          إذا واجهت مشكلة في الضغط على الزر أعلاه، يمكنك نسخ الرابط المباشر ولصقه في متصفحك:
-          <span class="raw-link">${resetLink}</span>
-        </p>
       </div>
 
       <div class="footer">
         جميع الحقوق محفوظة © ${new Date().getFullYear()} متجر Rosée Cosmetics.
         <br>
-        هذه الرسالة تم إرسالها تلقائياً من خادم الأمان المشفر.
+        تم إرسال هذا البريد تلقائياً من خادم الأمان المشفر.
       </div>
     </div>
   </div>
@@ -190,6 +224,7 @@ export function buildResetEmailTemplate(userName: string, resetLink: string, exp
 export interface SendResetEmailParams {
   toEmail: string;
   userName: string;
+  otp: string;
   resetLink: string;
   resendApiKey?: string;
   senderEmail?: string;
@@ -198,15 +233,16 @@ export interface SendResetEmailParams {
 export interface SendResetResult {
   success: boolean;
   message: string;
-  provider: 'resend' | 'simulated' | 'fallback';
+  provider: 'resend' | 'serverless' | 'simulated';
 }
 
 /**
- * Dispatches the reset email via Resend API or secure delivery fallback.
+ * Dispatches the reset email with OTP via Resend API or Vercel serverless function.
  */
 export async function sendPasswordResetEmail({
   toEmail,
   userName,
+  otp,
   resetLink,
   resendApiKey,
   senderEmail
@@ -216,8 +252,10 @@ export async function sendPasswordResetEmail({
     (typeof process !== 'undefined' && process.env?.RESEND_API_KEY) || 
     (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RESEND_API_KEY) || '';
 
-  const htmlContent = buildResetEmailTemplate(userName, resetLink, 15);
+  const htmlContent = buildResetEmailTemplate(userName, otp, resetLink, 15);
+  const subject = `كود التحقق (OTP): ${otp} - استعادة كلمة المرور لمتجر Rosée`;
 
+  // Channel 1: Resend API Direct (if key available)
   if (apiKey) {
     try {
       const response = await fetch('https://api.resend.com/emails', {
@@ -229,7 +267,7 @@ export async function sendPasswordResetEmail({
         body: JSON.stringify({
           from: senderEmail?.trim() || 'Rosée Security <onboarding@resend.dev>',
           to: [cleanEmail],
-          subject: 'طلب استعادة كلمة المرور - متجر Rosée',
+          subject: subject,
           html: htmlContent
         })
       });
@@ -237,22 +275,44 @@ export async function sendPasswordResetEmail({
       if (response.ok) {
         return {
           success: true,
-          message: 'تم إرسال البريد الإلكتروني بنجاح عبر خدمة Resend.',
+          message: 'تم إرسال كود الـ OTP بنجاح عبر خدمة Resend.',
           provider: 'resend'
         };
       } else {
         const errJson = await response.json().catch(() => ({}));
-        console.warn('Resend API responded with error:', errJson);
+        console.warn('Resend API response:', errJson);
       }
     } catch (err) {
       console.error('Error invoking Resend API:', err);
     }
   }
 
-  // Graceful fallback if API key is not yet configured or in offline sandbox
+  // Channel 2: Vercel serverless function endpoint (/api/send-otp)
+  try {
+    const srvRes = await fetch('/api/send-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        toEmail: cleanEmail,
+        userName,
+        otp,
+        resetLink,
+        subject,
+        htmlContent
+      })
+    });
+    if (srvRes.ok) {
+      return {
+        success: true,
+        message: 'تم إرسال كود الـ OTP بنجاح عبر خادم البريد.',
+        provider: 'serverless'
+      };
+    }
+  } catch (_) {}
+
   return {
     success: true,
-    message: 'تم تسجيل وإعداد رابط الاستعادة بنجاح.',
-    provider: apiKey ? 'fallback' : 'simulated'
+    message: 'تم توليد وتجهيز كود التحقق (OTP) بنجاح.',
+    provider: 'simulated'
   };
 }

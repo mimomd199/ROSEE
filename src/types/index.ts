@@ -130,6 +130,7 @@ export interface UserAccount {
   password?: string;
   email?: string;
   permissions: string[];
+  reset_otp?: string;
   reset_token?: string;
   reset_token_expires?: number | string;
 }

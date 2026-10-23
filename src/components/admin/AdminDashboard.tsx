@@ -30,7 +30,8 @@ import {
   Check,
   Calendar,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ExternalLink
 } from 'lucide-react';
 import { 
   RoseeDatabase, 
@@ -63,7 +64,12 @@ import {
   deleteCustomerOrdersInFirebase,
   updateRoseeField 
 } from '../../lib/firebase';
-import { generateSecureToken, hashPassword, sendPasswordResetEmail } from '../../lib/emailService';
+import { 
+  generateNumericOTP,
+  generateSecureToken, 
+  hashPassword, 
+  sendPasswordResetEmail 
+} from '../../lib/emailService';
 
 interface AdminDashboardProps {
   data: RoseeDatabase;
@@ -105,11 +111,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Forgot password modal state
+  // Forgot password modal state (3-Step Interactive OTP Wizard)
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'identify' | 'otp' | 'new_password'>('identify');
   const [forgotInput, setForgotInput] = useState('');
-  const [forgotFeedback, setForgotFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [forgotTargetUser, setForgotTargetUser] = useState<{ code: string; user: UserAccount; email: string } | null>(null);
+  const [forgotOtpInput, setForgotOtpInput] = useState('');
+  const [forgotNewPass, setForgotNewPass] = useState('');
+  const [forgotConfirmPass, setForgotConfirmPass] = useState('');
+  const [showForgotNewPass, setShowForgotNewPass] = useState(false);
+  const [forgotFeedback, setForgotFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [isForgotSubmitting, setIsForgotSubmitting] = useState(false);
+  const [needsEmailBinding, setNeedsEmailBinding] = useState<string | null>(null);
+  const [manualEmailInput, setManualEmailInput] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Resend OTP countdown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   // Employee profile modal state (Change password & link personal email)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -216,7 +240,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setLoginPassword('');
   };
 
-  // Handle forgot password: sends secure reset link via email and never exposes credentials on frontend
+  // Helper to mask email for security display (e.g. m***9@gmail.com)
+  const maskEmail = (email: string) => {
+    if (!email || !email.includes('@')) return email;
+    const [user, domain] = email.split('@');
+    if (user.length <= 2) return `${user}***@${domain}`;
+    return `${user[0]}***${user[user.length - 1]}@${domain}`;
+  };
+
+  // Step 1: Submit username or email to generate & send 6-digit OTP
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setForgotFeedback(null);
@@ -234,59 +266,256 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         );
       });
 
-      if (matched) {
-        const [code, u] = matched;
-        const targetEmail = u.email && u.email.includes('@') ? u.email.trim() : null;
-
-        if (targetEmail) {
-          // 1. Generate secure cryptographic token
-          const secureToken = generateSecureToken();
-          // 2. Set expiration to 15 minutes from now
-          const expiresAt = Date.now() + 15 * 60 * 1000;
-
-          // 3. Save reset_token and reset_token_expires to Firebase
-          const updatedUser: UserAccount = {
-            ...u,
-            reset_token: secureToken,
-            reset_token_expires: expiresAt
-          };
-
-          const updatedUsers = {
-            ...data.users,
-            [code]: updatedUser
-          };
-
-          await updateRoseeField('users', updatedUsers);
-
-          // 4. Construct direct reset link
-          const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rosee-store.vercel.app';
-          const resetLink = `${origin}/reset-password?token=${secureToken}`;
-
-          // 5. Send transactional email via Resend or delivery service
-          await sendPasswordResetEmail({
-            toEmail: targetEmail,
-            userName: u.name,
-            resetLink,
-            resendApiKey: data.settings?.resendApiKey,
-            senderEmail: data.settings?.resendSenderEmail
-          });
-
-          addSystemLog(`إصدار رمز استعادة كلمة المرور وإرسال الرابط المشفر إلى بريد الموظف ${u.name} (${targetEmail})`);
-        }
+      if (!matched) {
+        setForgotFeedback({
+          type: 'error',
+          message: 'لم يتم العثور على أي حساب مسجل بهذا الاسم أو الكود أو البريد.'
+        });
+        setIsForgotSubmitting(false);
+        return;
       }
 
-      // 6. Strict Security Requirement: Always display uniform success feedback to prevent account enumeration / data leakage
+      const [code, u] = matched;
+      let targetEmail = (u.email || manualEmailInput || '').trim();
+
+      // If account has no linked email yet, prompt user to bind one immediately
+      if (!targetEmail || !targetEmail.includes('@')) {
+        setNeedsEmailBinding(code);
+        setForgotFeedback({
+          type: 'info',
+          message: `الحساب (${code}) غير مقترن ببريد إلكتروني بعد. يرجى كتابة بريدك الشخصي أدناه لربطه واستلام كود الـ OTP فوراً.`
+        });
+        setIsForgotSubmitting(false);
+        return;
+      }
+
+      // 1. Generate 6-digit numeric OTP & secure token
+      const otpCode = generateNumericOTP(6);
+      const secureToken = generateSecureToken();
+      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes validity
+
+      // 2. Save reset_otp and reset_token to Firebase Database
+      const updatedUser: UserAccount = {
+        ...u,
+        email: targetEmail,
+        reset_otp: otpCode,
+        reset_token: secureToken,
+        reset_token_expires: expiresAt
+      };
+
+      const updatedUsers = {
+        ...data.users,
+        [code]: updatedUser
+      };
+
+      await updateRoseeField('users', updatedUsers);
+
+      // 3. Construct reset URL
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rosee-store.vercel.app';
+      const resetLink = `${origin}/reset-password?token=${secureToken}`;
+
+      // 4. Send real email via Resend & Serverless queue
+      await sendPasswordResetEmail({
+        toEmail: targetEmail,
+        userName: u.name,
+        otp: otpCode,
+        resetLink,
+        resendApiKey: data.settings?.resendApiKey,
+        senderEmail: data.settings?.resendSenderEmail
+      });
+
+      addSystemLog(`إرسال كود تحقق OTP لاستعادة كلمة المرور للمستخدم ${u.name} (${targetEmail})`);
+
+      // 5. Advance to Step 2 (OTP Entry)
+      setForgotTargetUser({ code, user: updatedUser, email: targetEmail });
+      setForgotStep('otp');
+      setResendCooldown(60);
       setForgotFeedback({
         type: 'success',
-        message: 'تم إرسال تعليمات استعادة كلمة المرور إلى بريدك الإلكتروني المسجل إذا كان صحيحاً.'
+        message: `تم إرسال كود التحقق (OTP) المكون من 6 أرقام إلى بريدك: ${maskEmail(targetEmail)}`
       });
-      setForgotInput('');
 
     } catch (err) {
       console.error('Forgot password submission error:', err);
       setForgotFeedback({
         type: 'error',
         message: 'حدث خطأ مؤقت أثناء معالجة الطلب. يرجى المحاولة بعد قليل.'
+      });
+    } finally {
+      setIsForgotSubmitting(false);
+    }
+  };
+
+  // Step 2: Verify the 6-digit OTP code entered by user
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotFeedback(null);
+
+    if (!forgotTargetUser) return;
+    const cleanOtp = forgotOtpInput.trim();
+
+    if (cleanOtp.length < 6) {
+      setForgotFeedback({
+        type: 'error',
+        message: 'يرجى إدخال كود التحقق (OTP) كاملاً (6 أرقام).'
+      });
+      return;
+    }
+
+    const currentSavedUser = data.users[forgotTargetUser.code];
+    if (!currentSavedUser || !currentSavedUser.reset_otp) {
+      setForgotFeedback({
+        type: 'error',
+        message: 'انتهت صلاحية الرمز أو لم يتم العثور على طلب استعادة نشط. يرجى طلب كود جديد.'
+      });
+      return;
+    }
+
+    const expiresTime = typeof currentSavedUser.reset_token_expires === 'string'
+      ? new Date(currentSavedUser.reset_token_expires).getTime()
+      : Number(currentSavedUser.reset_token_expires);
+
+    if (isNaN(expiresTime) || Date.now() > expiresTime) {
+      setForgotFeedback({
+        type: 'error',
+        message: 'انتهت صلاحية كود التحقق (صالح لمدة 15 دقيقة فقط). يرجى الضغط على "إعادة إرسال كود جديد".'
+      });
+      return;
+    }
+
+    if (cleanOtp !== currentSavedUser.reset_otp.trim()) {
+      setForgotFeedback({
+        type: 'error',
+        message: 'كود التحقق (OTP) غير صحيح! يرجى مراجعة بريدك الإلكتروني وكتابة الكود بدقة.'
+      });
+      return;
+    }
+
+    // Success: advance to Step 3
+    setForgotStep('new_password');
+    setForgotFeedback({
+      type: 'success',
+      message: '✅ تم التحقق من هويتك بنجاح! يمكنك الآن إدخال كلمة المرور الجديدة لحسابك.'
+    });
+  };
+
+  // Resend fresh OTP
+  const handleResendOtp = async () => {
+    if (!forgotTargetUser || resendCooldown > 0 || isForgotSubmitting) return;
+    setIsForgotSubmitting(true);
+    setForgotFeedback(null);
+
+    try {
+      const { code, user, email } = forgotTargetUser;
+      const otpCode = generateNumericOTP(6);
+      const secureToken = generateSecureToken();
+      const expiresAt = Date.now() + 15 * 60 * 1000;
+
+      const updatedUser: UserAccount = {
+        ...user,
+        email,
+        reset_otp: otpCode,
+        reset_token: secureToken,
+        reset_token_expires: expiresAt
+      };
+
+      await updateRoseeField('users', {
+        ...data.users,
+        [code]: updatedUser
+      });
+
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rosee-store.vercel.app';
+      const resetLink = `${origin}/reset-password?token=${secureToken}`;
+
+      await sendPasswordResetEmail({
+        toEmail: email,
+        userName: user.name,
+        otp: otpCode,
+        resetLink,
+        resendApiKey: data.settings?.resendApiKey,
+        senderEmail: data.settings?.resendSenderEmail
+      });
+
+      setForgotTargetUser({ code, user: updatedUser, email });
+      setResendCooldown(60);
+      setForgotFeedback({
+        type: 'success',
+        message: `تم إرسال كود OTP جديد بنجاح إلى بريدك: ${maskEmail(email)}`
+      });
+    } catch (err) {
+      console.error('Error resending OTP:', err);
+    } finally {
+      setIsForgotSubmitting(false);
+    }
+  };
+
+  // Step 3: Save new password, hash it with SHA-256, and clear OTP tokens
+  const handleResetPasswordWithOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotFeedback(null);
+
+    if (!forgotTargetUser) return;
+    const { code, user } = forgotTargetUser;
+
+    if (forgotNewPass.trim().length < 4) {
+      setForgotFeedback({
+        type: 'error',
+        message: 'كلمة المرور الجديدة يجب ألا تقل عن 4 خانات.'
+      });
+      return;
+    }
+
+    if (forgotNewPass.trim() !== forgotConfirmPass.trim()) {
+      setForgotFeedback({
+        type: 'error',
+        message: 'كلمتا المرور غير متطابقتين.'
+      });
+      return;
+    }
+
+    setIsForgotSubmitting(true);
+
+    try {
+      const hashedPassword = await hashPassword(forgotNewPass.trim());
+
+      const updatedUser: UserAccount = {
+        ...user,
+        password: hashedPassword,
+        reset_otp: undefined,
+        reset_token: undefined,
+        reset_token_expires: undefined
+      };
+
+      const updatedUsers = {
+        ...data.users,
+        [code]: updatedUser
+      };
+
+      await updateRoseeField('users', updatedUsers);
+      addSystemLog(`إعادة تعيين كلمة المرور بنجاح للمستخدم ${user.name} (${code}) عبر كود التحقق OTP`);
+
+      // Automatically sign in or finish
+      const newSession = {
+        code,
+        name: user.name,
+        role: user.role
+      };
+      setCurrentUser(newSession);
+      localStorage.setItem('rosee_active_session', JSON.stringify(newSession));
+
+      setIsForgotModalOpen(false);
+      setForgotStep('identify');
+      setForgotInput('');
+      setForgotOtpInput('');
+      setForgotNewPass('');
+      setForgotConfirmPass('');
+      setForgotFeedback(null);
+
+    } catch (err) {
+      console.error('Error saving new password:', err);
+      setForgotFeedback({
+        type: 'error',
+        message: 'حدث خطأ أثناء حفظ كلمة المرور الجديدة. يرجى المحاولة مرة أخرى.'
       });
     } finally {
       setIsForgotSubmitting(false);
@@ -755,79 +984,279 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         </div>
 
-        {/* Forgot Password Modal (Accessible from Login) */}
+        {/* Forgot Password Modal (3-Step Interactive OTP Recovery Wizard) */}
         {isForgotModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-            <div className="bg-[#181818] border border-gray-800 rounded-3xl w-full max-w-md p-6 text-right space-y-4 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+            <div className="bg-[#161616] border border-[#C5A059]/30 rounded-3xl w-full max-w-md p-6 text-right space-y-4 shadow-2xl shadow-black/80">
+              
+              {/* Modal Header */}
               <div className="flex items-center justify-between pb-3 border-b border-gray-800">
-                <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-[#C5A059]/20 text-[#C5A059] rounded-xl">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 bg-[#C5A059]/15 text-[#C5A059] rounded-xl border border-[#C5A059]/30">
                     <Mail className="w-4 h-4" />
                   </span>
-                  <h3 className="text-sm font-bold text-white">استعادة كلمة المرور عبر البريد الشخصي</h3>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">استعادة كلمة المرور عبر كود التحقق (OTP)</h3>
+                    <p className="text-[10px] text-gray-400">
+                      {forgotStep === 'identify' && 'الخطوة 1 من 3: تحديد الحساب والبريد'}
+                      {forgotStep === 'otp' && 'الخطوة 2 من 3: التحقق من كود الـ OTP'}
+                      {forgotStep === 'new_password' && 'الخطوة 3 من 3: تعيين كلمة المرور الجديدة'}
+                    </p>
+                  </div>
                 </div>
                 <button
-                  onClick={() => setIsForgotModalOpen(false)}
-                  className="text-gray-400 hover:text-white cursor-pointer"
+                  onClick={() => {
+                    setIsForgotModalOpen(false);
+                    setForgotStep('identify');
+                    setForgotFeedback(null);
+                  }}
+                  className="text-gray-400 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-gray-800 transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <p className="text-xs text-gray-400 leading-relaxed">
-                أدخل اسم المستخدم أو كود الدخول أو البريد الإلكتروني المسجل لحسابك، وسيقوم النظام المشفر بإرسال رابط آمن وخاص لإعادة تعيين كلمة المرور إلى بريدك الإلكتروني.
-              </p>
+              {/* Step Progress Indicators */}
+              <div className="grid grid-cols-3 gap-1.5 py-1">
+                <div className={`h-1.5 rounded-full transition-colors ${forgotStep === 'identify' || forgotStep === 'otp' || forgotStep === 'new_password' ? 'bg-[#C5A059]' : 'bg-gray-800'}`} />
+                <div className={`h-1.5 rounded-full transition-colors ${forgotStep === 'otp' || forgotStep === 'new_password' ? 'bg-[#C5A059]' : 'bg-gray-800'}`} />
+                <div className={`h-1.5 rounded-full transition-colors ${forgotStep === 'new_password' ? 'bg-[#C5A059]' : 'bg-gray-800'}`} />
+              </div>
 
+              {/* Feedback Alert Box */}
               {forgotFeedback && (
                 <div className={`p-3.5 rounded-2xl text-xs flex items-start gap-2.5 ${
                   forgotFeedback.type === 'success' 
                     ? 'bg-emerald-950/70 border border-emerald-800 text-emerald-200'
+                    : forgotFeedback.type === 'info'
+                    ? 'bg-amber-950/70 border border-amber-800 text-amber-200'
                     : 'bg-red-950/70 border border-red-800 text-red-200'
                 }`}>
                   {forgotFeedback.type === 'success' ? (
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : forgotFeedback.type === 'info' ? (
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   ) : (
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                   )}
                   <span className="leading-relaxed">{forgotFeedback.message}</span>
                 </div>
               )}
 
-              <form onSubmit={handleForgotSubmit} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">
-                    اسم المستخدم أو البريد المسجل:
-                  </label>
-                  <input
-                    type="text"
-                    value={forgotInput}
-                    onChange={(e) => setForgotInput(e.target.value)}
-                    placeholder="مثال: STAFF1 أو sara@example.com"
-                    required
-                    disabled={isForgotSubmitting}
-                    className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#C5A059] disabled:opacity-50"
-                  />
-                </div>
+              {/* STEP 1: IDENTIFY ACCOUNT */}
+              {forgotStep === 'identify' && (
+                <form onSubmit={handleForgotSubmit} className="space-y-3.5">
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    أدخل اسم المستخدم أو كود الدخول أو البريد الإلكتروني، وسيقوم النظام فوراً بإرسال كود تحقق رقمي (OTP) مكون من 6 أرقام إلى بريدك الشخصي.
+                  </p>
 
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsForgotModalOpen(false)}
-                    disabled={isForgotSubmitting}
-                    className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    إلغاء
-                  </button>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      اسم المستخدم أو كود الدخول أو البريد:
+                    </label>
+                    <input
+                      type="text"
+                      value={forgotInput}
+                      onChange={(e) => {
+                        setForgotInput(e.target.value);
+                        setNeedsEmailBinding(null);
+                      }}
+                      placeholder="مثال: ADMIN أو mimomd199@gmail.com"
+                      required
+                      disabled={isForgotSubmitting}
+                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#C5A059] disabled:opacity-50"
+                    />
+                  </div>
+
+                  {needsEmailBinding && (
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+                      <label className="block text-xs font-bold text-amber-300">
+                        📧 اكتب بريدك الإلكتروني الشخصي لربطه بهذا الحساب:
+                      </label>
+                      <input
+                        type="email"
+                        value={manualEmailInput}
+                        onChange={(e) => setManualEmailInput(e.target.value)}
+                        placeholder="your-email@gmail.com"
+                        required
+                        className="w-full p-2 bg-gray-900 border border-amber-500/40 rounded-lg text-white text-xs focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsForgotModalOpen(false)}
+                      disabled={isForgotSubmitting}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isForgotSubmitting || !forgotInput.trim()}
+                      className="px-5 py-2.5 bg-[#C5A059] hover:bg-[#b08d47] disabled:opacity-40 disabled:cursor-not-allowed text-[#111111] rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-md"
+                    >
+                      <Mail className="w-4 h-4" />
+                      <span>{isForgotSubmitting ? 'جاري التحقق والإرسال...' : 'إرسال كود التحقق (OTP) للبريد'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* STEP 2: ENTER & VERIFY 6-DIGIT OTP */}
+              {forgotStep === 'otp' && (
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div className="text-center space-y-1">
+                    <p className="text-xs text-gray-300">
+                      يرجى مراجعة بريدك الإلكتروني وإدخال كود الـ OTP المكون من 6 أرقام:
+                    </p>
+                    {forgotTargetUser && (
+                      <p className="text-xs text-[#C5A059] font-mono font-bold direction-ltr">
+                        {forgotTargetUser.email}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 6-Digit OTP Input */}
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={forgotOtpInput}
+                      onChange={(e) => setForgotOtpInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="• • • • • •"
+                      autoFocus
+                      required
+                      className="w-full py-3 px-4 bg-gray-900 border-2 border-[#C5A059]/40 rounded-2xl text-center text-2xl font-mono tracking-[0.5em] text-white focus:outline-none focus:border-[#C5A059] focus:ring-1 focus:ring-[#C5A059]"
+                    />
+                    <div className="flex items-center justify-between text-[11px] text-gray-400 px-1 pt-1">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-[#C5A059]" />
+                        <span>صالح لمدة 15 دقيقة</span>
+                      </span>
+                      <span>أدخل الأرقام الستة</span>
+                    </div>
+                  </div>
+
+                  {/* Submit OTP Verification Button */}
                   <button
                     type="submit"
-                    disabled={isForgotSubmitting || !forgotInput.trim()}
-                    className="px-5 py-2 bg-[#C5A059] hover:bg-[#b08d47] disabled:opacity-40 disabled:cursor-not-allowed text-[#111111] rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                    disabled={forgotOtpInput.trim().length < 6 || isForgotSubmitting}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-[#DFBA73] to-[#C5A059] hover:from-[#C5A059] hover:to-[#A38038] disabled:opacity-40 disabled:cursor-not-allowed text-black font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <Mail className="w-4 h-4" />
-                    <span>{isForgotSubmitting ? 'جاري التحقق والإرسال...' : 'إرسال تعليمات الاستعادة للبريد'}</span>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>تأكيد كود التحقق ومتابعة التعيين 🔒</span>
                   </button>
-                </div>
-              </form>
+
+                  {/* Secondary Quick Action Links */}
+                  <div className="pt-2 border-t border-gray-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={resendCooldown > 0 || isForgotSubmitting}
+                      className="text-[#C5A059] hover:underline disabled:text-gray-500 disabled:no-underline cursor-pointer"
+                    >
+                      {resendCooldown > 0 
+                        ? `إعادة إرسال كود جديد (${resendCooldown} ث)` 
+                        : '🔄 إعادة إرسال كود OTP جديد'}
+                    </button>
+
+                    <a
+                      href="https://mail.google.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-1"
+                    >
+                      <span>فتح Gmail</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotStep('identify');
+                        setForgotOtpInput('');
+                        setForgotFeedback(null);
+                      }}
+                      className="text-gray-400 hover:text-white cursor-pointer"
+                    >
+                      تغيير الحساب
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* STEP 3: SET NEW PASSWORD */}
+              {forgotStep === 'new_password' && (
+                <form onSubmit={handleResetPasswordWithOtp} className="space-y-3.5">
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    تم تأكيد هويتك بنجاح. أدخل الآن كلمة المرور الجديدة لحسابك:
+                  </p>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-300">
+                      كلمة المرور الجديدة (4 خانات على الأقل):
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showForgotNewPass ? 'text' : 'password'}
+                        value={forgotNewPass}
+                        onChange={(e) => setForgotNewPass(e.target.value)}
+                        placeholder="أدخل كلمة مرور جديدة"
+                        required
+                        minLength={4}
+                        className="w-full p-2.5 pl-9 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#C5A059]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotNewPass(!showForgotNewPass)}
+                        className="p-1 text-gray-400 hover:text-gray-200 absolute left-2.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                      >
+                        {showForgotNewPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-gray-300">
+                      تأكيد كلمة المرور الجديدة:
+                    </label>
+                    <input
+                      type={showForgotNewPass ? 'text' : 'password'}
+                      value={forgotConfirmPass}
+                      onChange={(e) => setForgotConfirmPass(e.target.value)}
+                      placeholder="أعد إدخال كلمة المرور"
+                      required
+                      className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#C5A059]"
+                    />
+                    {forgotConfirmPass && forgotNewPass !== forgotConfirmPass && (
+                      <p className="text-[10px] text-red-400">كلمتا المرور غير متطابقتين بعد</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsForgotModalOpen(false)}
+                      disabled={isForgotSubmitting}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isForgotSubmitting || !forgotNewPass || forgotNewPass !== forgotConfirmPass}
+                      className="px-5 py-2.5 bg-gradient-to-r from-[#DFBA73] to-[#C5A059] hover:from-[#C5A059] hover:to-[#A38038] disabled:opacity-40 disabled:cursor-not-allowed text-black rounded-xl text-xs font-extrabold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Key className="w-4 h-4" />
+                      <span>{isForgotSubmitting ? 'جاري التشفير والحفظ...' : 'حفظ كلمة المرور وتأمين الحساب 🚀'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
             </div>
           </div>
         )}

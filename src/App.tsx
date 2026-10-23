@@ -20,18 +20,23 @@ import { CartDrawer } from './components/store/CartDrawer';
 import { OrderTrackingModal } from './components/store/OrderTrackingModal';
 import { InvoiceModal } from './components/store/InvoiceModal';
 import { AdminDashboard } from './components/admin/AdminDashboard';
+import { ResetPasswordView } from './components/auth/ResetPasswordView';
 
 export default function App() {
-  const getInitialMode = (): 'store' | 'admin' => {
+  const getInitialMode = (): 'store' | 'admin' | 'reset-password' => {
     if (typeof window === 'undefined') return 'store';
     const path = window.location.pathname.toLowerCase();
+    const search = window.location.search.toLowerCase();
     const hash = window.location.hash.toLowerCase();
+    if (path.includes('reset-password') || search.includes('token=') || hash.includes('token=')) {
+      return 'reset-password';
+    }
     return (path === '/admin' || path.startsWith('/admin/') || hash === '#admin') ? 'admin' : 'store';
   };
 
   const [data, setData] = useState<RoseeDatabase>(DEFAULT_DATABASE);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeMode, setActiveMode] = useState<'store' | 'admin'>(getInitialMode);
+  const [activeMode, setActiveMode] = useState<'store' | 'admin' | 'reset-password'>(getInitialMode);
 
   // Storefront UI states
   const [cart, setCart] = useState<{ [key: string]: number }>({});
@@ -247,8 +252,11 @@ export default function App() {
   useEffect(() => {
     const handleUrlChange = () => {
       const path = window.location.pathname.toLowerCase();
+      const search = window.location.search.toLowerCase();
       const hash = window.location.hash.toLowerCase();
-      if (path === '/admin' || path.startsWith('/admin/') || hash === '#admin') {
+      if (path.includes('reset-password') || search.includes('token=') || hash.includes('token=')) {
+        setActiveMode('reset-password');
+      } else if (path === '/admin' || path.startsWith('/admin/') || hash === '#admin') {
         setActiveMode('admin');
       } else {
         setActiveMode('store');
@@ -268,7 +276,13 @@ export default function App() {
     <div className="relative min-h-screen bg-[#FAF9F6] text-[#111111] font-arabic">
       
       {/* Main Mode Renderer: Completely separate URLs & views */}
-      {activeMode === 'store' ? (
+      {activeMode === 'reset-password' ? (
+        <ResetPasswordView
+          data={data}
+          onSaveData={handleSaveData}
+          onNavigateToAdmin={() => switchMode('admin')}
+        />
+      ) : activeMode === 'store' ? (
         <>
           <Storefront
             catalog={data.catalog}

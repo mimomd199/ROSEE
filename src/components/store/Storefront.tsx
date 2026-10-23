@@ -332,6 +332,39 @@ export const Storefront: React.FC<StorefrontProps> = ({
   const [copiedOfferCode, setCopiedOfferCode] = useState<string | null>(null);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
+  // Easter egg: 5 consecutive clicks on the Rosée Logo within 3 seconds unlocks the admin portal
+  const [logoClicks, setLogoClicks] = useState<number[]>([]);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [showAdminUnlockToast, setShowAdminUnlockToast] = useState(false);
+
+  const handleLogoEasterEggClick = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const now = Date.now();
+    const recent = [...logoClicks.filter(t => now - t < 3000), now];
+    setLogoClicks(recent);
+
+    if (recent.length >= 5) {
+      setLogoClicks([]);
+      setIsAdminUnlocked(true);
+      setShowAdminUnlockToast(true);
+      try {
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.15 },
+          colors: ['#C5A059', '#DFBA73', '#FFFFFF']
+        });
+      } catch (_) {}
+      setTimeout(() => {
+        if (onOpenAdmin) {
+          onOpenAdmin();
+        } else {
+          window.location.href = '/admin.html';
+        }
+      }, 1300);
+    }
+  };
+
   // Auto-pan to left every 4 seconds if more than 1 offer exists
   useEffect(() => {
     if (publishedOffers.length <= 1 || !isOffersPopUpOpen || isAutoPanPaused) return;
@@ -1129,10 +1162,11 @@ export const Storefront: React.FC<StorefrontProps> = ({
       >
         <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-6">
           
-          {/* Brand Wordmark (Zone 1) - Luxury, Clean & Uncluttered */}
+          {/* Brand Wordmark (Zone 1) - Luxury, Clean & Uncluttered (5 clicks unlocks secret admin portal) */}
           <div 
             className="flex items-center min-w-0 cursor-pointer select-none shrink-0" 
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            onClick={handleLogoEasterEggClick}
+            title={texts.brandName}
           >
             <div className={langMode === 'ar' ? 'text-right' : 'text-left'}>
               <span 
@@ -2365,24 +2399,39 @@ export const Storefront: React.FC<StorefrontProps> = ({
             >
               {texts.footerBio} {new Date().getFullYear()}
             </p>
-            <span className="text-gray-600 hidden sm:inline">•</span>
-            <a
-              href="/admin.html"
-              onClick={(e) => {
-                if (onOpenAdmin) {
-                  e.preventDefault();
-                  onOpenAdmin();
-                }
-              }}
-              className="inline-flex items-center gap-1.5 text-gray-400 hover:text-[#C5A059] transition-colors cursor-pointer group py-1 px-2.5 rounded-lg hover:bg-white/5"
-              title="بوابة إدارة المتجر والموظفين المعتمدين"
-            >
-              <Lock className="w-3 h-3 group-hover:text-[#C5A059] transition-colors" />
-              <span>{langMode === 'ar' ? 'بوابة الإدارة والموظفين' : 'Staff Portal'}</span>
-            </a>
+            {isAdminUnlocked && (
+              <>
+                <span className="text-gray-600 hidden sm:inline">•</span>
+                <a
+                  href="/admin.html"
+                  onClick={(e) => {
+                    if (onOpenAdmin) {
+                      e.preventDefault();
+                      onOpenAdmin();
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 text-[#C5A059] bg-[#C5A059]/15 border border-[#C5A059]/30 transition-all cursor-pointer py-1 px-3 rounded-lg animate-pulse"
+                  title="بوابة إدارة المتجر والموظفين المعتمدين"
+                >
+                  <Lock className="w-3 h-3 text-[#C5A059]" />
+                  <span>{langMode === 'ar' ? 'بوابة الإدارة والموظفين (مفعّلة 🔓)' : 'Staff Portal (Unlocked 🔓)'}</span>
+                </a>
+              </>
+            )}
           </div>
         </div>
       </footer>
+
+      {/* Secret Admin Portal Unlock Toast (Easter Egg) */}
+      {showAdminUnlockToast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] bg-[#141414]/95 border-2 border-[#C5A059] text-white py-3.5 px-6 rounded-2xl shadow-2xl shadow-[#C5A059]/30 flex items-center gap-3 backdrop-blur-xl animate-bounce">
+          <span className="text-2xl select-none">🔐</span>
+          <div>
+            <p className="text-xs font-bold text-[#C5A059]">تم تفعيل بوابة الإدارة السرية بنجاح!</p>
+            <p className="text-[10px] text-gray-300">جاري توجيهك فوراً إلى لوحة التحكم المشفرة...</p>
+          </div>
+        </div>
+      )}
 
       {/* Review Submission Modal */}
       {onSubmitReview && (

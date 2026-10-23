@@ -63,6 +63,7 @@ import {
   deleteCustomerOrdersInFirebase,
   updateRoseeField 
 } from '../../lib/firebase';
+import { generateSecureToken, hashPassword, sendPasswordResetEmail } from '../../lib/emailService';
 
 interface AdminDashboardProps {
   data: RoseeDatabase;
@@ -108,6 +109,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [forgotInput, setForgotInput] = useState('');
   const [forgotFeedback, setForgotFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isForgotSubmitting, setIsForgotSubmitting] = useState(false);
 
   // Employee profile modal state (Change password & link personal email)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -163,8 +165,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return items.sort((a, b) => a.daysRemaining - b.daysRemaining);
   }, [data.catalog]);
 
-  // Handle staff login with username/code or email + password
-  const handleStaffLogin = (e: React.FormEvent) => {
+  // Handle staff login with username/code or email + password (supports both plain & SHA-256 hashed passwords)
+  const handleStaffLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
     const idClean = loginIdentifier.trim();
@@ -192,9 +194,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [code, u] = matchedEntry;
     const requiredPass = (u.password || '').trim();
 
-    if (requiredPass && requiredPass !== passClean) {
-      setLoginError('كلمة المرور غير صحيحة. يرجى المحاولة مرة أخرى أو النقر على "نسيت كلمة المرور".');
-      return;
+    if (requiredPass) {
+      const hashedAttempt = await hashPassword(passClean);
+      const isMatch = (requiredPass === passClean) || (requiredPass === hashedAttempt);
+      if (!isMatch) {
+        setLoginError('كلمة المرور غير صحيحة. يرجى المحاولة مرة أخرى أو النقر على "نسيت كلمة المرور".');
+        return;
+      }
     }
 
     const newSession = {
@@ -210,49 +216,81 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setLoginPassword('');
   };
 
-  // Handle forgot password: send credentials to personal email
-  const handleForgotSubmit = (e: React.FormEvent) => {
+  // Handle forgot password: sends secure reset link via email and never exposes credentials on frontend
+  const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setForgotFeedback(null);
     const query = forgotInput.trim();
     if (!query) return;
 
-    const matched = Object.entries(data.users).find(([code, u]) => {
-      return (
-        code.toUpperCase() === query.toUpperCase() ||
-        (u.email && u.email.trim().toLowerCase() === query.toLowerCase()) ||
-        u.name.trim().toLowerCase() === query.toLowerCase()
-      );
-    });
+    setIsForgotSubmitting(true);
 
-    if (!matched) {
+    try {
+      const matched = Object.entries(data.users).find(([code, u]) => {
+        return (
+          code.toUpperCase() === query.toUpperCase() ||
+          (u.email && u.email.trim().toLowerCase() === query.toLowerCase()) ||
+          u.name.trim().toLowerCase() === query.toLowerCase()
+        );
+      });
+
+      if (matched) {
+        const [code, u] = matched;
+        const targetEmail = u.email && u.email.includes('@') ? u.email.trim() : null;
+
+        if (targetEmail) {
+          // 1. Generate secure cryptographic token
+          const secureToken = generateSecureToken();
+          // 2. Set expiration to 15 minutes from now
+          const expiresAt = Date.now() + 15 * 60 * 1000;
+
+          // 3. Save reset_token and reset_token_expires to Firebase
+          const updatedUser: UserAccount = {
+            ...u,
+            reset_token: secureToken,
+            reset_token_expires: expiresAt
+          };
+
+          const updatedUsers = {
+            ...data.users,
+            [code]: updatedUser
+          };
+
+          await updateRoseeField('users', updatedUsers);
+
+          // 4. Construct direct reset link
+          const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rosee-store.vercel.app';
+          const resetLink = `${origin}/reset-password?token=${secureToken}`;
+
+          // 5. Send transactional email via Resend or delivery service
+          await sendPasswordResetEmail({
+            toEmail: targetEmail,
+            userName: u.name,
+            resetLink,
+            resendApiKey: data.settings?.resendApiKey,
+            senderEmail: data.settings?.resendSenderEmail
+          });
+
+          addSystemLog(`إصدار رمز استعادة كلمة المرور وإرسال الرابط المشفر إلى بريد الموظف ${u.name} (${targetEmail})`);
+        }
+      }
+
+      // 6. Strict Security Requirement: Always display uniform success feedback to prevent account enumeration / data leakage
+      setForgotFeedback({
+        type: 'success',
+        message: 'تم إرسال تعليمات استعادة كلمة المرور إلى بريدك الإلكتروني المسجل إذا كان صحيحاً.'
+      });
+      setForgotInput('');
+
+    } catch (err) {
+      console.error('Forgot password submission error:', err);
       setForgotFeedback({
         type: 'error',
-        message: 'لم يتم العثور على أي حساب مسجل بهذا الاسم أو البريد.'
+        message: 'حدث خطأ مؤقت أثناء معالجة الطلب. يرجى المحاولة بعد قليل.'
       });
-      return;
+    } finally {
+      setIsForgotSubmitting(false);
     }
-
-    const [code, u] = matched;
-    const targetEmail = u.email && u.email.includes('@') ? u.email.trim() : null;
-
-    if (targetEmail) {
-      const subject = encodeURIComponent(`استعادة كلمة المرور - متجر ROSÉE (${u.name})`);
-      const body = encodeURIComponent(
-        `مرحباً ${u.name}،\n\nإليك بيانات حسابك في نظام متجر ROSÉE:\n• اسم المستخدم / كود الدخول: ${code}\n• كلمة المرور: ${u.password || 'بدون كلمة سر'}\n\nيرجى الاحتفاظ بهذه البيانات بأمان.`
-      );
-      try {
-        window.open(`mailto:${targetEmail}?subject=${subject}&body=${body}`, '_blank');
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    addSystemLog(`استعادة بيانات كلمة المرور للموظف ${u.name} (${code})`);
-    setForgotFeedback({
-      type: 'success',
-      message: `✅ اسم المستخدم: (${code}) | كلمة المرور: (${u.password || 'بدون كلمة سر'})${targetEmail ? ` — تم تجهيز إرسالها إلى بريدك: ${targetEmail}` : ' (يرجى نسخها وحفظها)'}`
-    });
   };
 
   // Open profile modal and populate current email
@@ -267,7 +305,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsProfileModalOpen(true);
   };
 
-  // Save profile changes (Password change & Email binding)
+  // Save profile changes (Password change & Email binding with SHA-256)
   const handleSaveProfileChanges = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileModalFeedback(null);
@@ -279,17 +317,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     // If changing password, verify old password
     if (profileNewPass.trim()) {
-      if (currentSavedPass && profileCurrentPass.trim() !== currentSavedPass) {
+      const hashedCurrent = await hashPassword(profileCurrentPass.trim());
+      const isCurrentValid = (currentSavedPass === profileCurrentPass.trim()) || (currentSavedPass === hashedCurrent);
+      if (currentSavedPass && !isCurrentValid) {
         setProfileModalFeedback({
           type: 'error',
           message: 'كلمة المرور الحالية غير صحيحة! يرجى التأكد والمحاولة مجدداً.'
         });
         return;
       }
-      if (profileNewPass.trim().length < 3) {
+      if (profileNewPass.trim().length < 4) {
         setProfileModalFeedback({
           type: 'error',
-          message: 'كلمة المرور الجديدة يجب ألا تقل عن 3 خانات.'
+          message: 'كلمة المرور الجديدة يجب ألا تقل عن 4 خانات.'
         });
         return;
       }
@@ -302,7 +342,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     }
 
-    const newPassToSave = profileNewPass.trim() ? profileNewPass.trim() : u.password;
+    const newPassToSave = profileNewPass.trim() ? await hashPassword(profileNewPass.trim()) : u.password;
     const updatedUsers = {
       ...data.users,
       [currentUser.code]: {
@@ -313,7 +353,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     await onSaveData({ ...data, users: updatedUsers });
-    addSystemLog(`قام الموظف ${currentUser.name} (${currentUser.code}) بتحديث كلمة المرور الخاصة به`);
+    addSystemLog(`قام الموظف ${currentUser.name} (${currentUser.code}) بتحديث كلمة المرور الخاصة به وتشفيرها`);
     setProfileModalFeedback({
       type: 'success',
       message: '✅ تم تحديث كلمة المرور وحفظ البيانات بنجاح في قاعدة البيانات!'
@@ -735,7 +775,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <p className="text-xs text-gray-400 leading-relaxed">
-                أدخل اسم المستخدم أو كود الدخول أو البريد الإلكتروني المسجل لحسابك، وسيقوم النظام فوراً بإرسال بيانات الدخول وكلمة المرور إلى بريدك الإلكتروني الشخصي المرتبط بحسابك.
+                أدخل اسم المستخدم أو كود الدخول أو البريد الإلكتروني المسجل لحسابك، وسيقوم النظام المشفر بإرسال رابط آمن وخاص لإعادة تعيين كلمة المرور إلى بريدك الإلكتروني.
               </p>
 
               {forgotFeedback && (
@@ -764,7 +804,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onChange={(e) => setForgotInput(e.target.value)}
                     placeholder="مثال: STAFF1 أو sara@example.com"
                     required
-                    className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#C5A059]"
+                    disabled={isForgotSubmitting}
+                    className="w-full p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white text-xs placeholder-gray-500 focus:outline-none focus:border-[#C5A059] disabled:opacity-50"
                   />
                 </div>
 
@@ -772,16 +813,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsForgotModalOpen(false)}
+                    disabled={isForgotSubmitting}
                     className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-[#C5A059] hover:bg-[#b08d47] text-[#111111] rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                    disabled={isForgotSubmitting || !forgotInput.trim()}
+                    className="px-5 py-2 bg-[#C5A059] hover:bg-[#b08d47] disabled:opacity-40 disabled:cursor-not-allowed text-[#111111] rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
                   >
                     <Mail className="w-4 h-4" />
-                    <span>إرسال كلمة المرور للبريد</span>
+                    <span>{isForgotSubmitting ? 'جاري التحقق والإرسال...' : 'إرسال تعليمات الاستعادة للبريد'}</span>
                   </button>
                 </div>
               </form>

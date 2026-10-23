@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { subscribeToRoseeData, saveRoseeData, DEFAULT_DATABASE } from './lib/firebase';
 import { RoseeDatabase } from './types';
 import { AdminDashboard } from './components/admin/AdminDashboard';
+import { ResetPasswordView } from './components/auth/ResetPasswordView';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 
 export default function AdminApp() {
@@ -26,6 +27,12 @@ export default function AdminApp() {
     window.location.href = '/';
   };
 
+  const isResetPassword = typeof window !== 'undefined' && (
+    window.location.search.includes('token=') || 
+    window.location.hash.includes('token=') ||
+    window.location.pathname.includes('reset-password')
+  );
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#0D0D0D] text-white flex flex-col items-center justify-center p-6 font-arabic space-y-4">
@@ -43,6 +50,20 @@ export default function AdminApp() {
             R O S É E • E R P • S E C U R E • G A T E
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (isResetPassword) {
+    return (
+      <div className="min-h-screen bg-[#0D0D0D] text-white font-arabic">
+        <ResetPasswordView
+          data={data}
+          onSaveData={handleSaveData}
+          onNavigateToAdmin={() => {
+            window.location.href = '/admin.html';
+          }}
+        />
       </div>
     );
   }

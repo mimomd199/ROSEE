@@ -130,6 +130,8 @@ export interface UserAccount {
   password?: string;
   email?: string;
   permissions: string[];
+  reset_token?: string;
+  reset_token_expires?: number | string;
 }
 
 export interface TrustBadge {
@@ -441,6 +443,9 @@ export interface AppSettings {
   giftingConfig?: GiftingConfig;
   spinWheelConfig?: SpinWheelConfig;
   treasureHuntConfig?: TreasureHuntConfig;
+  // Transactional Email Service
+  resendApiKey?: string;
+  resendSenderEmail?: string;
 }
 
 export interface ReelItem {

@@ -279,6 +279,31 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [editingEmployee, setEditingEmployee] = useState<EditingEmployeeState | null>(null);
   const [isSavingEmployee, setIsSavingEmployee] = useState<boolean>(false);
 
+  // Email Service (Resend / SMTP) settings state
+  const [resendApiKeyInput, setResendApiKeyInput] = useState(settings.resendApiKey || '');
+  const [resendSenderEmailInput, setResendSenderEmailInput] = useState(settings.resendSenderEmail || 'Rosée Security <onboarding@resend.dev>');
+  const [emailServiceSavedNotice, setEmailServiceSavedNotice] = useState(false);
+  const [isSavingEmailSettings, setIsSavingEmailSettings] = useState(false);
+
+  const handleSaveEmailSettings = async () => {
+    setIsSavingEmailSettings(true);
+    try {
+      const updated: AppSettings = {
+        ...settings,
+        resendApiKey: resendApiKeyInput.trim(),
+        resendSenderEmail: resendSenderEmailInput.trim()
+      };
+      await onSaveSettings(updated);
+      onLogAction('تحديث إعدادات خدمة البريد الإلكتروني المشفر (Resend API)');
+      setEmailServiceSavedNotice(true);
+      setTimeout(() => setEmailServiceSavedNotice(false), 3000);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSavingEmailSettings(false);
+    }
+  };
+
   // Catalog items local copy
   const [catalogItems, setCatalogItems] = useState<ProductCatalog>(() => JSON.parse(JSON.stringify(catalog || {})));
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -5135,6 +5160,78 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       {/* 3. Users & Permissions Tab */}
       {activeTab === 'users' && (
         <div className="space-y-6">
+
+          {/* Secure Transactional Email Service Card (Resend / SMTP) */}
+          <div className="p-6 bg-white border border-[#C5A059]/30 rounded-2xl shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-[#C5A059]/15 text-[#C5A059] rounded-xl">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">
+                    خدمة البريد الإلكتروني المشفر (Resend API / استعادة كلمات المرور)
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    ربط خدمة إرسال الإيميلات الرسمية لرسائل استعادة كلمة المرور والتنبيهات الأمنية.
+                  </p>
+                </div>
+              </div>
+
+              {emailServiceSavedNotice && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-bold bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 animate-fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>تم حفظ وتفعيل إعدادات البريد بنجاح!</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  مفتاح Resend API Key:
+                </label>
+                <input
+                  type="password"
+                  value={resendApiKeyInput}
+                  onChange={(e) => setResendApiKeyInput(e.target.value)}
+                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxx"
+                  className="w-full p-2.5 text-xs border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-[#C5A059]"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  يمكنك الحصول على المفتاح مجاناً من resend.com، أو تركه فارغاً لاستخدام بيئة الاختبار الآمنة.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  اسم وبريد المرسل (Sender Email / Domain):
+                </label>
+                <input
+                  type="text"
+                  value={resendSenderEmailInput}
+                  onChange={(e) => setResendSenderEmailInput(e.target.value)}
+                  placeholder="Rosée Security <security@yourdomain.com>"
+                  className="w-full p-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  الافتراضي: Rosée Security &lt;onboarding@resend.dev&gt;
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleSaveEmailSettings}
+                disabled={isSavingEmailSettings}
+                className="py-2.5 px-6 bg-[#111111] hover:bg-[#C5A059] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                <span>{isSavingEmailSettings ? 'جاري الحفظ...' : 'حفظ إعدادات البريد الإلكتروني'}</span>
+              </button>
+            </div>
+          </div>
           
           {/* Add Staff Form */}
           <div className="p-6 bg-white border border-gray-100 rounded-2xl shadow-sm space-y-4">

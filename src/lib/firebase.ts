@@ -42,7 +42,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { icon: 'truck', text: 'شحن سريع لكافة المحافظات' },
     { icon: 'shield', text: 'جودة استثنائية مضمونة' },
     { icon: 'lock', text: 'دفع آمن عند الاستلام' }
-  ]
+  ],
+  resendApiKey: '',
+  resendSenderEmail: 'Rosée Security <onboarding@resend.dev>'
 };
 
 export const DEFAULT_CATALOG: ProductCatalog = {

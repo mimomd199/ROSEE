@@ -335,12 +335,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (emailResult.success) {
         setForgotFeedback({
           type: 'success',
-          message: `تم إرسال تعليمات استعادة كلمة المرور وكود التحقق (OTP) إلى بريدك الإلكتروني المسجل: ${maskEmail(targetEmail)}`
+          message: `تم إرسال كود التحقق (OTP) بنجاح إلى بريدك: ${targetEmail}. يرجى مراجعة صندوق الوارد (أو مجلد Spam).`
         });
       } else {
         setForgotFeedback({
-          type: 'info',
-          message: `${emailResult.message || 'تم إنشاء طلب الاستعادة.'} (يرجى مراجعة صندوق البريد الوارد أو الـ Spam)`
+          type: 'error',
+          message: emailResult.message || 'فشل إرسال كود التحقق. يرجى مراجعة إعدادات البريد.'
         });
       }
 
@@ -452,12 +452,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (emailResult.success) {
         setForgotFeedback({
           type: 'success',
-          message: `تم إرسال كود OTP جديد بنجاح إلى بريدك: ${maskEmail(email)}`
+          message: `تم إرسال كود OTP جديد بنجاح إلى بريدك: ${email}. يرجى مراجعة صندوق الوارد (أو مجلد Spam).`
         });
       } else {
         setForgotFeedback({
-          type: 'info',
-          message: `${emailResult.message || 'تم إنشاء طلب جديد.'} (يرجى مراجعة البريد والـ Spam)`
+          type: 'error',
+          message: emailResult.message || 'فشل إعادة إرسال الكود.'
         });
       }
     } catch (err) {

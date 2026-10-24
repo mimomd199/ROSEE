@@ -257,46 +257,27 @@ export async function sendPasswordResetEmail({
   smtp
 }: SendResetEmailParams): Promise<SendResetResult> {
   const cleanEmail = toEmail.trim().toLowerCase();
-  const apiKey = resendApiKey?.trim() || 
+  let apiKey = resendApiKey?.trim() || 
     (typeof process !== 'undefined' && process.env?.RESEND_API_KEY) || 
     (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RESEND_API_KEY) || '';
+
+  // Fallback: load directly from Firebase if not yet populated in client memory
+  if (!apiKey && typeof window !== 'undefined') {
+    try {
+      const fbSnap = await fetch('https://rosee-erp-default-rtdb.firebaseio.com/rosee_data/settings/resendApiKey.json');
+      if (fbSnap.ok) {
+        const val = await fbSnap.json();
+        if (typeof val === 'string' && val.trim()) {
+          apiKey = val.trim();
+        }
+      }
+    } catch (_) {}
+  }
 
   const htmlContent = buildResetEmailTemplate(userName, otp, resetLink, 15);
   const subject = `كود التحقق (OTP): ${otp} - استعادة كلمة المرور لمتجر Rosée`;
 
-  // Channel 1: Resend API Direct (if key available)
-  if (apiKey) {
-    try {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: senderEmail?.trim() || 'Rosée Security <onboarding@resend.dev>',
-          to: [cleanEmail],
-          subject: subject,
-          html: htmlContent
-        })
-      });
-
-      if (response.ok) {
-        return {
-          success: true,
-          message: 'تم إرسال كود الـ OTP بنجاح إلى بريدك الإلكتروني عبر Resend.',
-          provider: 'resend'
-        };
-      } else {
-        const errJson = await response.json().catch(() => ({}));
-        console.warn('Resend API response:', errJson);
-      }
-    } catch (err: any) {
-      console.error('Error invoking Resend API:', err);
-    }
-  }
-
-  // Channel 2: Serverless function endpoint (/api/send-otp) supporting SMTP and Resend
+  // Channel 1: Serverless function endpoint (/api/send-otp)
   try {
     const srvRes = await fetch('/api/send-otp', {
       method: 'POST',
@@ -319,8 +300,8 @@ export async function sendPasswordResetEmail({
     if (srvRes.ok && resJson.success) {
       return {
         success: true,
-        message: 'تم إرسال رسالة كود التحقق بنجاح إلى بريدك الإلكتروني.',
-        provider: resJson.provider || 'serverless'
+        message: 'تم إرسال كود التحقق بنجاح إلى بريدك الإلكتروني.',
+        provider: resJson.provider || 'resend'
       };
     } else {
       return {
@@ -330,6 +311,7 @@ export async function sendPasswordResetEmail({
       };
     }
   } catch (err: any) {
+    console.error('Serverless send-otp failed:', err);
     return {
       success: false,
       message: 'تعذر الاتصال بخادم إرسال البريد الإلكتروني.',

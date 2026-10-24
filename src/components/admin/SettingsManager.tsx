@@ -280,10 +280,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [isSavingEmployee, setIsSavingEmployee] = useState<boolean>(false);
 
   // Email Service (Resend / SMTP) settings state
+  const [emailProviderMode, setEmailProviderMode] = useState<'resend' | 'smtp'>(
+    settings.smtpConfig?.host ? 'smtp' : 'resend'
+  );
   const [resendApiKeyInput, setResendApiKeyInput] = useState(settings.resendApiKey || '');
   const [resendSenderEmailInput, setResendSenderEmailInput] = useState(settings.resendSenderEmail || 'Rosée Security <onboarding@resend.dev>');
+  const [smtpHostInput, setSmtpHostInput] = useState(settings.smtpConfig?.host || '');
+  const [smtpPortInput, setSmtpPortInput] = useState(settings.smtpConfig?.port ? String(settings.smtpConfig.port) : '465');
+  const [smtpUserInput, setSmtpUserInput] = useState(settings.smtpConfig?.user || '');
+  const [smtpPassInput, setSmtpPassInput] = useState(settings.smtpConfig?.pass || '');
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
   const [emailServiceSavedNotice, setEmailServiceSavedNotice] = useState(false);
   const [isSavingEmailSettings, setIsSavingEmailSettings] = useState(false);
+  const [testEmailStatus, setTestEmailStatus] = useState<{ loading: boolean; message?: string; success?: boolean } | null>(null);
 
   const handleSaveEmailSettings = async () => {
     setIsSavingEmailSettings(true);
@@ -291,16 +300,59 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       const updated: AppSettings = {
         ...settings,
         resendApiKey: resendApiKeyInput.trim(),
-        resendSenderEmail: resendSenderEmailInput.trim()
+        resendSenderEmail: resendSenderEmailInput.trim(),
+        smtpConfig: smtpHostInput.trim() ? {
+          host: smtpHostInput.trim(),
+          port: Number(smtpPortInput) || 465,
+          user: smtpUserInput.trim(),
+          pass: smtpPassInput.trim(),
+          secure: Number(smtpPortInput) === 465
+        } : undefined
       };
       await onSaveSettings(updated);
-      onLogAction('تحديث إعدادات خدمة البريد الإلكتروني المشفر (Resend API)');
+      onLogAction('تحديث إعدادات خدمة البريد الإلكتروني (Resend / SMTP)');
       setEmailServiceSavedNotice(true);
       setTimeout(() => setEmailServiceSavedNotice(false), 3000);
     } catch (e) {
       console.error(e);
     } finally {
       setIsSavingEmailSettings(false);
+    }
+  };
+
+  const handleSendTestEmail = async (targetEmail: string) => {
+    if (!targetEmail) return;
+    setTestEmailStatus({ loading: true });
+    try {
+      const res = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toEmail: targetEmail,
+          userName: 'مدير المتجر',
+          otp: '123456',
+          resetLink: `${window.location.origin}/#admin`,
+          subject: 'رسالة اختبار خدمة البريد - متجر Rosée',
+          htmlContent: '<div style="direction:rtl;font-family:sans-serif;padding:20px;background:#141414;color:#fff;border-radius:12px;"><h2>متجر Rosée</h2><p>تهانينا! خدمة إرسال البريد الإلكتروني تعمل بنجاح وبشكل آمن.</p></div>',
+          resendApiKey: resendApiKeyInput.trim(),
+          senderEmail: resendSenderEmailInput.trim(),
+          smtp: smtpHostInput.trim() ? {
+            host: smtpHostInput.trim(),
+            port: Number(smtpPortInput) || 465,
+            user: smtpUserInput.trim(),
+            pass: smtpPassInput.trim(),
+            secure: Number(smtpPortInput) === 465
+          } : undefined
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setTestEmailStatus({ loading: false, success: true, message: `✅ نجح الإرسال عبر ${data.provider} إلى ${targetEmail}` });
+      } else {
+        setTestEmailStatus({ loading: false, success: false, message: `❌ فشل الإرسال: ${data.message || data.error || 'يرجى التحقق من المفتاح أو بيانات السيرفر'}` });
+      }
+    } catch (err: any) {
+      setTestEmailStatus({ loading: false, success: false, message: `❌ خطأ في الاتصال: ${err.message}` });
     }
   };
 
@@ -5162,7 +5214,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         <div className="space-y-6">
 
           {/* Secure Transactional Email Service Card (Resend / SMTP) */}
-          <div className="p-6 bg-white border border-[#C5A059]/30 rounded-2xl shadow-sm space-y-4">
+          <div className="p-6 bg-white border border-[#C5A059]/30 rounded-2xl shadow-sm space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-[#C5A059]/15 text-[#C5A059] rounded-xl">
@@ -5170,62 +5222,160 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-gray-900">
-                    خدمة البريد الإلكتروني المشفر (Resend API / استعادة كلمات المرور)
+                    خدمة البريد الإلكتروني المشفر (Resend API أو SMTP)
                   </h3>
                   <p className="text-[11px] text-gray-500">
-                    ربط خدمة إرسال الإيميلات الرسمية لرسائل استعادة كلمة المرور والتنبيهات الأمنية.
+                    لإرسال أكواد استعادة كلمة المرور (OTP) وروابط التعيين الآمنة إلى صندوق الوارد مباشرة.
                   </p>
                 </div>
               </div>
 
-              {emailServiceSavedNotice && (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-bold bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 animate-fade-in">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>تم حفظ وتفعيل إعدادات البريد بنجاح!</span>
+              {/* Provider Selector */}
+              <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setEmailProviderMode('resend')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    emailProviderMode === 'resend'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  Resend API (موصى به)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmailProviderMode('smtp')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    emailProviderMode === 'smtp'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  SMTP / Gmail
+                </button>
+              </div>
+            </div>
+
+            {emailServiceSavedNotice && (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-bold bg-emerald-50 px-3.5 py-2 rounded-xl border border-emerald-200 animate-fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>تم حفظ وتفعيل إعدادات البريد بنجاح!</span>
+              </div>
+            )}
+
+            {emailProviderMode === 'resend' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    مفتاح Resend API Key:
+                  </label>
+                  <input
+                    type="password"
+                    value={resendApiKeyInput}
+                    onChange={(e) => setResendApiKeyInput(e.target.value)}
+                    placeholder="re_123456789_abcdef..."
+                    className="w-full p-2.5 text-xs border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-[#C5A059]"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    احصل على مفتاحك مجاناً وبدون بطاقة ائتمان من <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="text-[#C5A059] underline font-bold">resend.com</a> (100 إيميل مجاني يومياً).
+                  </p>
                 </div>
-              )}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  مفتاح Resend API Key:
-                </label>
-                <input
-                  type="password"
-                  value={resendApiKeyInput}
-                  onChange={(e) => setResendApiKeyInput(e.target.value)}
-                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxx"
-                  className="w-full p-2.5 text-xs border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-[#C5A059]"
-                />
-                <p className="text-[10px] text-gray-400 mt-1">
-                  يمكنك الحصول على المفتاح مجاناً من resend.com، أو تركه فارغاً لاستخدام بيئة الاختبار الآمنة.
-                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    اسم وبريد المرسل (Sender Email / Domain):
+                  </label>
+                  <input
+                    type="text"
+                    value={resendSenderEmailInput}
+                    onChange={(e) => setResendSenderEmailInput(e.target.value)}
+                    placeholder="Rosée Security <onboarding@resend.dev>"
+                    className="w-full p-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    الافتراضي للحساب المجاني: <code className="bg-gray-100 px-1 py-0.5 rounded">Rosée Security &lt;onboarding@resend.dev&gt;</code>
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 animate-fade-in">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">خادم SMTP Host:</label>
+                  <input
+                    type="text"
+                    value={smtpHostInput}
+                    onChange={(e) => setSmtpHostInput(e.target.value)}
+                    placeholder="smtp.gmail.com"
+                    className="w-full p-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">المنفذ Port:</label>
+                  <input
+                    type="text"
+                    value={smtpPortInput}
+                    onChange={(e) => setSmtpPortInput(e.target.value)}
+                    placeholder="465"
+                    className="w-full p-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">اسم المستخدم / البريد:</label>
+                  <input
+                    type="email"
+                    value={smtpUserInput}
+                    onChange={(e) => setSmtpUserInput(e.target.value)}
+                    placeholder="yourname@gmail.com"
+                    className="w-full p-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">كلمة المرور / App Password:</label>
+                  <div className="relative">
+                    <input
+                      type={showSmtpPass ? 'text' : 'password'}
+                      value={smtpPassInput}
+                      onChange={(e) => setSmtpPassInput(e.target.value)}
+                      placeholder="كلمة مرور التطبيق (16 حرف)"
+                      className="w-full p-2.5 pl-8 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSmtpPass(!showSmtpPass)}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                    >
+                      {showSmtpPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Test Email & Save Row */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-gray-100">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSendTestEmail(smtpUserInput || 'mimomd199@gmail.com')}
+                  disabled={testEmailStatus?.loading}
+                  className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-800 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5 text-[#C5A059]" />
+                  <span>{testEmailStatus?.loading ? 'جاري الإرسال التجريبي...' : 'إرسال بريد تجريبي للتأكد ✉️'}</span>
+                </button>
+                {testEmailStatus?.message && (
+                  <span className={`text-xs font-semibold ${testEmailStatus.success ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {testEmailStatus.message}
+                  </span>
+                )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  اسم وبريد المرسل (Sender Email / Domain):
-                </label>
-                <input
-                  type="text"
-                  value={resendSenderEmailInput}
-                  onChange={(e) => setResendSenderEmailInput(e.target.value)}
-                  placeholder="Rosée Security <security@yourdomain.com>"
-                  className="w-full p-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-[#C5A059]"
-                />
-                <p className="text-[10px] text-gray-400 mt-1">
-                  الافتراضي: Rosée Security &lt;onboarding@resend.dev&gt;
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end pt-2">
               <button
                 type="button"
                 onClick={handleSaveEmailSettings}
                 disabled={isSavingEmailSettings}
-                className="py-2.5 px-6 bg-[#111111] hover:bg-[#C5A059] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center gap-2"
+                className="py-2.5 px-6 bg-[#111111] hover:bg-[#C5A059] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center justify-center gap-2"
               >
                 <Save className="w-4 h-4" />
                 <span>{isSavingEmailSettings ? 'جاري الحفظ...' : 'حفظ إعدادات البريد الإلكتروني'}</span>

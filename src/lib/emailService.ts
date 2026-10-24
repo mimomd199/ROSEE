@@ -228,16 +228,24 @@ export interface SendResetEmailParams {
   resetLink: string;
   resendApiKey?: string;
   senderEmail?: string;
+  smtp?: {
+    host: string;
+    port?: number;
+    user: string;
+    pass: string;
+    secure?: boolean;
+  };
 }
 
 export interface SendResetResult {
   success: boolean;
   message: string;
-  provider: 'resend' | 'serverless' | 'simulated';
+  provider?: 'resend' | 'smtp' | 'serverless';
+  errorDetails?: any;
 }
 
 /**
- * Dispatches the reset email with OTP via Resend API or Vercel serverless function.
+ * Dispatches the reset email with OTP via Resend API or Vercel serverless function (with Nodemailer SMTP).
  */
 export async function sendPasswordResetEmail({
   toEmail,
@@ -245,7 +253,8 @@ export async function sendPasswordResetEmail({
   otp,
   resetLink,
   resendApiKey,
-  senderEmail
+  senderEmail,
+  smtp
 }: SendResetEmailParams): Promise<SendResetResult> {
   const cleanEmail = toEmail.trim().toLowerCase();
   const apiKey = resendApiKey?.trim() || 
@@ -275,19 +284,19 @@ export async function sendPasswordResetEmail({
       if (response.ok) {
         return {
           success: true,
-          message: 'تم إرسال كود الـ OTP بنجاح عبر خدمة Resend.',
+          message: 'تم إرسال كود الـ OTP بنجاح إلى بريدك الإلكتروني عبر Resend.',
           provider: 'resend'
         };
       } else {
         const errJson = await response.json().catch(() => ({}));
         console.warn('Resend API response:', errJson);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error invoking Resend API:', err);
     }
   }
 
-  // Channel 2: Vercel serverless function endpoint (/api/send-otp)
+  // Channel 2: Serverless function endpoint (/api/send-otp) supporting SMTP and Resend
   try {
     const srvRes = await fetch('/api/send-otp', {
       method: 'POST',
@@ -298,21 +307,33 @@ export async function sendPasswordResetEmail({
         otp,
         resetLink,
         subject,
-        htmlContent
+        htmlContent,
+        resendApiKey: apiKey,
+        senderEmail,
+        smtp
       })
     });
-    if (srvRes.ok) {
+
+    const resJson = await srvRes.json().catch(() => ({}));
+
+    if (srvRes.ok && resJson.success) {
       return {
         success: true,
-        message: 'تم إرسال كود الـ OTP بنجاح عبر خادم البريد.',
-        provider: 'serverless'
+        message: 'تم إرسال رسالة كود التحقق بنجاح إلى بريدك الإلكتروني.',
+        provider: resJson.provider || 'serverless'
+      };
+    } else {
+      return {
+        success: false,
+        message: resJson.message || resJson.error || 'تعذر إرسال البريد الإلكتروني. يرجى التأكد من إعدادات خدمة البريد.',
+        errorDetails: resJson
       };
     }
-  } catch (_) {}
-
-  return {
-    success: true,
-    message: 'تم توليد وتجهيز كود التحقق (OTP) بنجاح.',
-    provider: 'simulated'
-  };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: 'تعذر الاتصال بخادم إرسال البريد الإلكتروني.',
+      errorDetails: err?.message
+    };
+  }
 }

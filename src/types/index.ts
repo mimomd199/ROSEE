@@ -447,6 +447,14 @@ export interface AppSettings {
   // Transactional Email Service
   resendApiKey?: string;
   resendSenderEmail?: string;
+  smtpConfig?: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    secure?: boolean;
+    senderName?: string;
+  };
 }
 
 export interface ReelItem {

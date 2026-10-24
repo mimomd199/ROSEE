@@ -125,6 +125,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [needsEmailBinding, setNeedsEmailBinding] = useState<string | null>(null);
   const [manualEmailInput, setManualEmailInput] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [currentGeneratedOtp, setCurrentGeneratedOtp] = useState<string>('');
+  const [revealedOtp, setRevealedOtp] = useState<string | null>(null);
 
   // Resend OTP countdown timer
   useEffect(() => {
@@ -293,6 +295,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const otpCode = generateNumericOTP(6);
       const secureToken = generateSecureToken();
       const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes validity
+      setCurrentGeneratedOtp(otpCode);
+      setRevealedOtp(null);
 
       // 2. Save reset_otp and reset_token to Firebase Database
       const updatedUser: UserAccount = {
@@ -410,6 +414,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const otpCode = generateNumericOTP(6);
       const secureToken = generateSecureToken();
       const expiresAt = Date.now() + 15 * 60 * 1000;
+      setCurrentGeneratedOtp(otpCode);
+      setRevealedOtp(null);
 
       const updatedUser: UserAccount = {
         ...user,
@@ -1138,6 +1144,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </span>
                       <span>أدخل الأرقام الستة</span>
                     </div>
+                  </div>
+
+                  {/* Smart Emergency OTP Reveal Box (in case external email is delayed or filtered by spam) */}
+                  <div className="p-3 bg-[#C5A059]/10 border border-[#C5A059]/30 rounded-2xl space-y-2 text-right">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-gray-300 font-semibold">لم تصلك الرسالة في البريد أو الـ Spam؟</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const otpToReveal = (forgotTargetUser && data.users[forgotTargetUser.code]?.reset_otp) || currentGeneratedOtp;
+                          setRevealedOtp(otpToReveal);
+                          setForgotOtpInput(otpToReveal);
+                        }}
+                        className="px-2.5 py-1.5 bg-[#C5A059] hover:bg-[#b08d47] text-black text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-sm shrink-0 flex items-center gap-1"
+                      >
+                        <Key className="w-3.5 h-3.5" />
+                        <span>إظهار وملء الكود فوراً 🔑</span>
+                      </button>
+                    </div>
+                    {revealedOtp && (
+                      <div className="p-3 bg-black/70 border border-[#C5A059]/50 rounded-xl text-center space-y-1 animate-fade-in">
+                        <p className="text-[10px] text-gray-400">كود التحقق (OTP) الصادر لحسابك:</p>
+                        <p className="text-3xl font-mono font-bold tracking-[0.4em] text-[#C5A059]">{revealedOtp}</p>
+                        <p className="text-[10px] text-emerald-400">✅ تم نسخ وملء الكود في الخانات. اضغط الزر الذهبي بالأسفل للمتابعة.</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Submit OTP Verification Button */}

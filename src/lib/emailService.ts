@@ -300,7 +300,7 @@ export async function sendPasswordResetEmail({
     if (srvRes.ok && resJson.success) {
       return {
         success: true,
-        message: 'تم إرسال كود التحقق بنجاح إلى بريدك الإلكتروني.',
+        message: resJson.message || 'تم إرسال كود التحقق بنجاح إلى بريدك الإلكتروني.',
         provider: resJson.provider || 'resend'
       };
     } else {

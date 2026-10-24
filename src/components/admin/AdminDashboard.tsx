@@ -335,7 +335,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (emailResult.success) {
         setForgotFeedback({
           type: 'success',
-          message: `تم إرسال كود التحقق (OTP) بنجاح إلى بريدك: ${targetEmail}. يرجى مراجعة صندوق الوارد (أو مجلد Spam).`
+          message: emailResult.message || `تم إرسال كود التحقق (OTP) بنجاح إلى بريدك: ${targetEmail}. يرجى مراجعة صندوق الوارد (أو مجلد Spam).`
         });
       } else {
         setForgotFeedback({
@@ -452,7 +452,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (emailResult.success) {
         setForgotFeedback({
           type: 'success',
-          message: `تم إرسال كود OTP جديد بنجاح إلى بريدك: ${email}. يرجى مراجعة صندوق الوارد (أو مجلد Spam).`
+          message: emailResult.message || `تم إرسال كود OTP جديد بنجاح إلى بريدك: ${email}. يرجى مراجعة صندوق الوارد (أو مجلد Spam).`
         });
       } else {
         setForgotFeedback({

@@ -99,6 +99,50 @@ export default async function handler(req: any, res: any) {
           message: 'تم إرسال كود التحقق بنجاح إلى البريد الإلكتروني.'
         });
       } else {
+        if (data?.message && (data.message.includes('only send testing emails') || data.message.includes('resend.com/domains'))) {
+          // Extract the allowed owner email from the error message (e.g. mimomd199@gmail.com)
+          const match = data.message.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
+          const ownerEmail = match ? match[1] : 'mimomd199@gmail.com';
+
+          const fallbackRes = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${effectiveResendKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              from: effectiveSender,
+              to: [ownerEmail],
+              subject: `كود التحقق (OTP) لحساب ${userName || cleanEmail} - متجر Rosée`,
+              html: `
+                <div style="direction:rtl;padding:25px;background:#141414;color:#fff;border-radius:16px;border:1px solid #C5A059;font-family:sans-serif;">
+                  <h2 style="color:#C5A059;margin-top:0;">متجر Rosée</h2>
+                  <p>طلب استعادة كلمة المرور للمستخدم: <strong>${userName || 'المستخدم'}</strong> (${cleanEmail})</p>
+                  <p>كود التحقق (OTP) هو:</p>
+                  <div style="font-size:36px;font-weight:bold;letter-spacing:10px;color:#C5A059;padding:15px;background:#000;text-align:center;border-radius:12px;margin:15px 0;">
+                    ${otp}
+                  </div>
+                  <p style="font-size:12px;color:#888;">
+                    ⏳ صالح لمدة 15 دقيقة.<br>
+                    💡 <em>ملاحظة: تم إرسال الرسالة إلى بريدك الأساسي (${ownerEmail}) لأن حساب Resend التجريبي يرسل لبريدك المسجل فقط حتى يتم توثيق دومين مخصص.</em>
+                  </p>
+                </div>
+              `
+            })
+          });
+
+          if (fallbackRes.ok) {
+            const fbData = await fallbackRes.json().catch(() => ({}));
+            return res.status(200).json({
+              success: true,
+              provider: 'resend',
+              id: fbData.id || 'sent',
+              deliveredTo: ownerEmail,
+              message: `تم إرسال كود التحقق بنجاح إلى بريدك المعتمد في Resend (${ownerEmail}).`
+            });
+          }
+        }
+
         console.error('Resend delivery failed:', data);
         if (!smtp && !process.env.SMTP_HOST) {
           return res.status(502).json({

@@ -49,6 +49,48 @@ function devSendOtpPlugin() {
               if (resendRes.ok) {
                 res.statusCode = 200;
                 res.end(JSON.stringify({ success: true, provider: 'resend', id: rData.id }));
+              } else if (rData?.message && (rData.message.includes('only send testing emails') || rData.message.includes('resend.com/domains'))) {
+                const ownerEmail = 'mimomd199@gmail.com';
+                const fallbackRes = await fetch('https://api.resend.com/emails', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    from: sender,
+                    to: [ownerEmail],
+                    subject: `كود التحقق (OTP) لحساب ${body.userName || body.toEmail} - متجر Rosée`,
+                    html: `
+                      <div style="direction:rtl;padding:25px;background:#141414;color:#fff;border-radius:16px;border:1px solid #C5A059;font-family:sans-serif;">
+                        <h2 style="color:#C5A059;margin-top:0;">متجر Rosée</h2>
+                        <p>طلب استعادة كلمة المرور للمستخدم: <strong>${body.userName || 'المستخدم'}</strong> (${body.toEmail})</p>
+                        <p>كود التحقق (OTP) الصادر هو:</p>
+                        <div style="font-size:36px;font-weight:bold;letter-spacing:10px;color:#C5A059;padding:15px;background:#000;text-align:center;border-radius:12px;margin:15px 0;">
+                          ${body.otp}
+                        </div>
+                        <p style="font-size:12px;color:#888;">
+                          ⏳ صالح لمدة 15 دقيقة.<br>
+                          💡 <em>ملاحظة: تم إرسال الرسالة إلى بريدك الأساسي (${ownerEmail}) لأن حساب Resend التجريبي يرسل لبريدك المسجل فقط حتى يتم توثيق دومين مخصص.</em>
+                        </p>
+                      </div>
+                    `
+                  })
+                });
+                if (fallbackRes.ok) {
+                  const fbData = await fallbackRes.json().catch(() => ({}));
+                  res.statusCode = 200;
+                  res.end(JSON.stringify({
+                    success: true,
+                    provider: 'resend',
+                    id: fbData.id || 'sent',
+                    deliveredTo: ownerEmail,
+                    message: `تم إرسال كود التحقق بنجاح إلى بريدك المعتمد في Resend (${ownerEmail}).`
+                  }));
+                } else {
+                  res.statusCode = 502;
+                  res.end(JSON.stringify({ success: false, error: 'Resend failed', details: rData }));
+                }
               } else {
                 res.statusCode = 502;
                 res.end(JSON.stringify({ success: false, error: 'Resend failed', details: rData }));
